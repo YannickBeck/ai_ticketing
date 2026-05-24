@@ -104,8 +104,19 @@ Erwarteter Entwicklungsablauf:
 ```bash
 npm install
 cp .env.example .env.local
-npx prisma migrate dev
+npm run db:up
+npm run prisma:migrate
+npm run prisma:seed
+npm run smoke:p0
 npm run dev
 ```
 
-Für das MVP sollten Stripe Webhooks lokal über die Stripe CLI getestet werden. Die Datenbank sollte bereits lokal PostgreSQL mit PostGIS oder ein kompatibles Cloud-Development-Setup verwenden.
+`npm run db:up` nutzt Docker Compose und startet PostgreSQL passend zur `DATABASE_URL` aus `.env.example`. Falls Docker lokal nicht verfügbar ist, muss PostgreSQL manuell mit Datenbank `spargelstand_app`, User `postgres` und Passwort `postgres` laufen.
+
+`npm run smoke:p0` prüft den DB-backed Kernfluss lokal: Reservierung, Inventory-Hold, Payment-Success-Simulation, QR-Erzeugung, Staff-Scan und Pickup. Der Smoke-Test gibt keine QR-Klartexte, Payment-Payloads oder vollständigen Telefonnummern aus.
+
+Für echte Stripe Webhooks im MVP sollte zusätzlich die Stripe CLI genutzt werden:
+
+```bash
+stripe listen --forward-to localhost:3000/api/v1/webhooks/stripe
+```

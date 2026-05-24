@@ -46,6 +46,7 @@
 | N-10 | Staff Scan/Pickup UI an API anbinden | Partial: Token-Scan und Fallback-Pickup angebunden; Browser-Kamera offen |
 | N-11 | Staff Bestand/Lieferung an Inventory-API anbinden | Done: Staff Inventory und Delivery schreiben InventoryEvents |
 | N-12 | Admin Inventory/Orders von Mockdaten loesen | Partial: Tabellen lesen Prisma; Product/Stand Listen noch mockbasiert |
+| N-13 | Lokales PostgreSQL-Setup und P0-Smoke-Runner stabilisieren | Done: Docker Compose, npm-Scripts und `smoke:p0` angelegt |
 
 ## Payment Follow-up
 

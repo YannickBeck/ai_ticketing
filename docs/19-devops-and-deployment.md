@@ -9,8 +9,9 @@ Empfohlene lokale Voraussetzungen:
 | Tool | Zweck |
 | --- | --- |
 | Node.js LTS | Next.js und API |
-| npm oder pnpm | Paketverwaltung |
-| PostgreSQL | Lokale Datenbank |
+| npm | Paketverwaltung |
+| Docker Compose | Optionaler lokaler PostgreSQL-Start |
+| PostgreSQL | Lokale Datenbank, alternativ via Docker Compose |
 | PostGIS | Geo-Suche, falls lokal verfügbar |
 | Prisma CLI | Migrationen und Client-Generierung |
 | Stripe CLI | Lokale Webhook-Tests |
@@ -21,10 +22,17 @@ Typischer Start:
 ```bash
 npm install
 cp .env.example .env.local
-npx prisma migrate dev
+npm run db:up
+npm run prisma:migrate
+npm run prisma:seed
+npm run smoke:p0
 npm run dev
 stripe listen --forward-to localhost:3000/api/v1/webhooks/stripe
 ```
+
+`npm run db:up` startet PostgreSQL über `docker-compose.yml` mit Datenbank `spargelstand_app`. Ohne Docker muss ein kompatibles lokales PostgreSQL unter der `DATABASE_URL` laufen.
+
+`npm run smoke:p0` validiert den lokalen DB-backed Kernfluss ohne Stripe-Livebetrieb: Reservierung, Inventory-Hold, simuliertes Stripe-Success-Event, QR-Erzeugung, Staff-Scan und Pickup. Der Smoke-Test ist fuer lokale Datenbanken gedacht und blockiert nicht-lokale `DATABASE_URL`s ohne explizites Override.
 
 ## Environment Variables
 
@@ -68,6 +76,8 @@ Regeln:
 2. Keine manuellen Schemaänderungen in Production.
 3. Vor produktiver Migration Backup erstellen oder Point-in-Time-Recovery aktiv haben.
 4. Seed-Daten nur für lokale und Staging-Umgebungen nutzen.
+
+Nach lokalen Migrationen sollte `npm run prisma:seed` und danach `npm run smoke:p0` laufen, damit die P0-E2E-Basis gegen echte Prisma-Queries geprueft ist.
 
 ## CI/CD
 

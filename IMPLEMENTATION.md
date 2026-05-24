@@ -29,7 +29,11 @@ Prisma 7 nutzt `prisma.config.ts` fuer CLI-Konfiguration und im Runtime-Pfad den
 ```bash
 npm install
 cp .env.example .env.local
+npm run db:up
+npm run prisma:migrate
+npm run prisma:seed
 npm run prisma:generate
+npm run smoke:p0
 npm run dev
 ```
 
@@ -43,8 +47,13 @@ npm install
 Für eine echte Datenbank:
 
 ```bash
+npm run db:up
 npm run prisma:migrate
+npm run prisma:seed
+npm run smoke:p0
 ```
+
+`db:up` nutzt `docker-compose.yml` fuer lokale PostgreSQL-Entwicklung. Wenn Docker nicht installiert ist, muss PostgreSQL manuell unter der `DATABASE_URL` aus `.env.example` bereitstehen.
 
 ## Checks
 
@@ -87,6 +96,18 @@ docs/data-model         Datenmodell-Dokumentation
 | Payment | Stripe PaymentIntent-Skeleton, `PaymentEvent`, Webhook-Statusguards, QR/Notification nach Success |
 | WhatsApp | P1-Provider-Adapter und Webhook-Skeleton |
 | Tests | Erste Tests für Inventory und Notification-Regeln |
+
+## Lokaler P0-Smoke-Test
+
+`npm run smoke:p0` legt eigene Smoke-Daten an und prueft den Kernfluss gegen die lokale Datenbank:
+
+1. Smoke-Stand, Produkt, Staff- und Customer-User sicherstellen.
+2. Customer-Reservierung mit Inventory-Locking erstellen.
+3. Pending Payment anlegen und Stripe-Success-Event simulieren.
+4. QRToken erzeugen, Staff-Scan pruefen und Pickup abschliessen.
+5. Bestand und reservierte Menge nach Pickup validieren.
+
+Der Smoke-Test verweigert nicht-lokale Datenbanken, solange `ALLOW_NON_LOCAL_SMOKE_DB=1` nicht explizit gesetzt ist.
 
 ## Payment-Implementierung
 
