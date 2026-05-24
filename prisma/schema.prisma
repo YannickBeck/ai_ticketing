@@ -1,0 +1,471 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  CUSTOMER       @map("customer")
+  PRODUCER_ADMIN @map("producer_admin")
+  STAFF          @map("staff")
+  PLATFORM_ADMIN @map("platform_admin")
+}
+
+enum ProducerStatus {
+  ACTIVE   @map("active")
+  PAUSED   @map("paused")
+  DISABLED @map("disabled")
+}
+
+enum StandStatus {
+  OPEN           @map("open")
+  CLOSED         @map("closed")
+  SEASONAL_PAUSE @map("seasonal_pause")
+}
+
+enum InventoryStatus {
+  AVAILABLE              @map("available")
+  LOW_STOCK              @map("low_stock")
+  OUT_OF_STOCK           @map("out_of_stock")
+  NEXT_DELIVERY_EXPECTED @map("next_delivery_expected")
+}
+
+enum OrderStatus {
+  DRAFT            @map("draft")
+  PENDING_PAYMENT  @map("pending_payment")
+  CONFIRMED        @map("confirmed")
+  READY_FOR_PICKUP @map("ready_for_pickup")
+  PICKED_UP        @map("picked_up")
+  CANCELLED        @map("cancelled")
+  EXPIRED          @map("expired")
+  REFUNDED         @map("refunded")
+}
+
+enum PaymentProvider {
+  STRIPE @map("stripe")
+  PAYPAL @map("paypal")
+}
+
+enum PaymentStatus {
+  PENDING   @map("pending")
+  SUCCEEDED @map("succeeded")
+  FAILED    @map("failed")
+  REFUNDED  @map("refunded")
+}
+
+enum PayoutStatus {
+  PENDING   @map("pending")
+  SUCCEEDED @map("succeeded")
+  FAILED    @map("failed")
+}
+
+enum QRTokenType {
+  STAND         @map("stand")
+  STAND_PRODUCT @map("stand_product")
+  ORDER         @map("order")
+  STAFF         @map("staff")
+}
+
+enum QRTokenStatus {
+  ACTIVE  @map("active")
+  USED    @map("used")
+  EXPIRED @map("expired")
+  REVOKED @map("revoked")
+}
+
+enum InventoryEventType {
+  MANUAL_UPDATE       @map("manual_update")
+  RESERVATION_HOLD    @map("reservation_hold")
+  RESERVATION_RELEASE @map("reservation_release")
+  PICKUP              @map("pickup")
+  CANCELLATION        @map("cancellation")
+  DELIVERY            @map("delivery")
+  CORRECTION          @map("correction")
+  OUT_OF_STOCK        @map("out_of_stock")
+}
+
+enum NotificationChannel {
+  EMAIL    @map("email")
+  WHATSAPP @map("whatsapp")
+  PUSH     @map("push")
+}
+
+enum NotificationType {
+  ORDER_CONFIRMED   @map("order_confirmed")
+  PAYMENT_CONFIRMED @map("payment_confirmed")
+  PICKUP_REMINDER   @map("pickup_reminder")
+  ORDER_READY       @map("order_ready")
+  ORDER_CHANGED     @map("order_changed")
+  PICKED_UP         @map("picked_up")
+  ORDER_CANCELLED   @map("order_cancelled")
+}
+
+enum NotificationStatus {
+  PENDING   @map("pending")
+  SENT      @map("sent")
+  DELIVERED @map("delivered")
+  FAILED    @map("failed")
+  CANCELLED @map("cancelled")
+}
+
+enum DeliveryPlanStatus {
+  PLANNED   @map("planned")
+  IN_TRANSIT @map("in_transit")
+  DELIVERED @map("delivered")
+  CANCELLED @map("cancelled")
+}
+
+model User {
+  id                           String                   @id @default(uuid())
+  name                         String
+  email                        String                   @unique
+  phoneNumber                  String?
+  phoneVerifiedAt              DateTime?
+  whatsappOptIn                Boolean                  @default(false)
+  whatsappOptInAt              DateTime?
+  whatsappOptOutAt             DateTime?
+  preferredNotificationChannel NotificationChannel?
+  role                         UserRole                 @default(CUSTOMER)
+  producerId                   String?
+  active                       Boolean                  @default(true)
+  createdAt                    DateTime                 @default(now())
+  updatedAt                    DateTime                 @updatedAt
+
+  producer                     Producer?                @relation(fields: [producerId], references: [id])
+  orders                       Order[]                  @relation("CustomerOrders")
+  notifications                Notification[]
+  notificationPreferences      NotificationPreference[]
+  staffStandAssignments        StaffStandAssignment[]
+  inventoryUpdates             Inventory[]              @relation("InventoryUpdatedBy")
+  usedQrTokens                 QRToken[]                @relation("QRTokenUsedBy")
+  inventoryEvents              InventoryEvent[]         @relation("InventoryEventActor")
+  deliveryPlansCreated         DeliveryPlan[]           @relation("DeliveryPlanCreatedBy")
+
+  @@index([producerId])
+  @@index([role])
+}
+
+model Producer {
+  id               String          @id @default(uuid())
+  name             String
+  legalName        String?
+  billingEmail     String?
+  paymentAccountId String?
+  status           ProducerStatus  @default(ACTIVE)
+  serviceFeeConfig Json            @default("{\"flatFeeCents\":99}")
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  users            User[]
+  stands           Stand[]
+  products         Product[]
+  orders           Order[]
+  deliveryPlans    DeliveryPlan[]
+}
+
+model Stand {
+  id                    String                 @id @default(uuid())
+  producerId            String
+  name                  String
+  addressLine           String
+  postalCode            String
+  city                  String
+  latitude              Decimal                @db.Decimal(10, 7)
+  longitude             Decimal                @db.Decimal(10, 7)
+  openingHours          Json
+  status                StandStatus            @default(OPEN)
+  publicNote            String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  producer              Producer               @relation(fields: [producerId], references: [id])
+  inventories           Inventory[]
+  orders                Order[]
+  pickupSlots           PickupSlot[]
+  staffStandAssignments StaffStandAssignment[]
+  inventoryEvents       InventoryEvent[]
+  deliveryPlans         DeliveryPlan[]
+
+  @@index([producerId])
+  @@index([status])
+  @@index([latitude, longitude])
+}
+
+model Product {
+  id              String           @id @default(uuid())
+  producerId      String
+  name            String
+  category        String
+  unit            String
+  priceCents      Int
+  currency        String           @default("EUR")
+  active          Boolean          @default(true)
+  description     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  producer        Producer         @relation(fields: [producerId], references: [id])
+  inventories     Inventory[]
+  orderItems      OrderItem[]
+  inventoryEvents InventoryEvent[]
+  deliveryPlans   DeliveryPlan[]
+
+  @@index([producerId])
+  @@index([active])
+}
+
+model Inventory {
+  id                String          @id @default(uuid())
+  standId           String
+  productId         String
+  stockQuantity     Decimal         @default(0) @db.Decimal(12, 3)
+  reservedQuantity  Decimal         @default(0) @db.Decimal(12, 3)
+  safetyBuffer      Decimal         @default(0) @db.Decimal(12, 3)
+  lowStockThreshold Decimal         @default(0) @db.Decimal(12, 3)
+  status            InventoryStatus @default(OUT_OF_STOCK)
+  nextDeliveryAt    DateTime?
+  updatedByUserId   String?
+  updatedAt         DateTime        @updatedAt
+
+  stand             Stand           @relation(fields: [standId], references: [id])
+  product           Product         @relation(fields: [productId], references: [id])
+  updatedBy         User?           @relation("InventoryUpdatedBy", fields: [updatedByUserId], references: [id])
+  orderItems        OrderItem[]
+
+  @@unique([standId, productId])
+  @@index([standId, status])
+  @@index([productId])
+}
+
+model PickupSlot {
+  id             String   @id @default(uuid())
+  standId        String
+  startAt        DateTime
+  endAt          DateTime
+  capacityOrders Int?
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  stand          Stand    @relation(fields: [standId], references: [id])
+  orders         Order[]
+
+  @@index([standId, startAt])
+}
+
+model Order {
+  id                String      @id @default(uuid())
+  orderNumber       String      @unique
+  customerId        String
+  producerId        String
+  standId           String
+  pickupSlotId      String?
+  pickupSlotStart   DateTime
+  pickupSlotEnd     DateTime
+  status            OrderStatus @default(PENDING_PAYMENT)
+  productTotalCents Int
+  serviceFeeCents   Int
+  totalAmountCents  Int
+  currency          String      @default("EUR")
+  expiresAt         DateTime?
+  pickedUpAt        DateTime?
+  cancelledAt       DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  customer          User        @relation("CustomerOrders", fields: [customerId], references: [id])
+  producer          Producer    @relation(fields: [producerId], references: [id])
+  stand             Stand       @relation(fields: [standId], references: [id])
+  pickupSlot        PickupSlot? @relation(fields: [pickupSlotId], references: [id])
+  items             OrderItem[]
+  payment           Payment?
+  paymentEvents     PaymentEvent[]
+  notifications     Notification[]
+  inventoryEvents   InventoryEvent[]
+
+  @@index([customerId])
+  @@index([producerId])
+  @@index([standId, status])
+  @@index([pickupSlotStart])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id              String    @id @default(uuid())
+  orderId         String
+  productId       String
+  standProductId  String
+  quantity        Decimal   @db.Decimal(12, 3)
+  unit            String
+  unitPriceCents  Int
+  totalPriceCents Int
+
+  order           Order     @relation(fields: [orderId], references: [id])
+  product         Product   @relation(fields: [productId], references: [id])
+  standProduct    Inventory @relation(fields: [standProductId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model Payment {
+  id                  String          @id @default(uuid())
+  orderId             String          @unique
+  provider            PaymentProvider @default(STRIPE)
+  providerPaymentId   String?
+  providerEventId     String?         @unique
+  status              PaymentStatus   @default(PENDING)
+  amountTotalCents    Int
+  productAmountCents  Int
+  serviceFeeCents     Int
+  providerFeeCents    Int?
+  payoutStatus        PayoutStatus?
+  refundedAmountCents Int             @default(0)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  order               Order           @relation(fields: [orderId], references: [id])
+  events              PaymentEvent[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model PaymentEvent {
+  id                String           @id @default(uuid())
+  paymentId         String?
+  orderId           String?
+  provider          PaymentProvider  @default(STRIPE)
+  providerEventId   String           @unique
+  providerPaymentId String?
+  type              String
+  mappedStatus      PaymentStatus?
+  handled           Boolean          @default(false)
+  createdAt         DateTime         @default(now())
+
+  payment           Payment?         @relation(fields: [paymentId], references: [id])
+  order             Order?           @relation(fields: [orderId], references: [id])
+
+  @@index([paymentId])
+  @@index([orderId])
+  @@index([providerPaymentId])
+  @@index([createdAt])
+}
+
+model QRToken {
+  id            String        @id @default(uuid())
+  type          QRTokenType
+  referenceId   String
+  tokenNonce    String?
+  tokenHash     String        @unique
+  expiresAt     DateTime?
+  usedAt        DateTime?
+  usedByUserId  String?
+  status        QRTokenStatus @default(ACTIVE)
+  createdAt     DateTime      @default(now())
+
+  usedBy        User?         @relation("QRTokenUsedBy", fields: [usedByUserId], references: [id])
+
+  @@index([type, referenceId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model InventoryEvent {
+  id              String             @id @default(uuid())
+  standId         String
+  productId       String
+  orderId         String?
+  type            InventoryEventType
+  quantityDelta   Decimal            @db.Decimal(12, 3)
+  stockAfter      Decimal            @db.Decimal(12, 3)
+  reservedAfter   Decimal            @db.Decimal(12, 3)
+  actorId         String?
+  note            String?
+  createdAt       DateTime           @default(now())
+
+  stand           Stand              @relation(fields: [standId], references: [id])
+  product         Product            @relation(fields: [productId], references: [id])
+  order           Order?             @relation(fields: [orderId], references: [id])
+  actor           User?              @relation("InventoryEventActor", fields: [actorId], references: [id])
+
+  @@index([standId, productId, createdAt])
+  @@index([orderId])
+  @@index([type])
+}
+
+model Notification {
+  id                String              @id @default(uuid())
+  userId            String
+  orderId           String?
+  channel           NotificationChannel
+  type              NotificationType
+  templateKey       String
+  recipient         String
+  status            NotificationStatus  @default(PENDING)
+  provider          String
+  providerMessageId String?             @unique
+  errorMessage      String?
+  scheduledAt       DateTime?
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  createdAt         DateTime            @default(now())
+
+  user              User                @relation(fields: [userId], references: [id])
+  order             Order?              @relation(fields: [orderId], references: [id])
+
+  @@index([userId])
+  @@index([orderId, channel, status])
+  @@index([scheduledAt])
+  @@index([createdAt])
+}
+
+model NotificationPreference {
+  id        String              @id @default(uuid())
+  userId    String
+  channel   NotificationChannel
+  enabled   Boolean             @default(false)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  user      User                @relation(fields: [userId], references: [id])
+
+  @@unique([userId, channel])
+}
+
+model DeliveryPlan {
+  id                  String             @id @default(uuid())
+  producerId          String
+  standId             String
+  productId           String
+  plannedQuantity     Decimal            @db.Decimal(12, 3)
+  recommendedQuantity Decimal?           @db.Decimal(12, 3)
+  plannedArrivalAt    DateTime
+  status              DeliveryPlanStatus @default(PLANNED)
+  createdByUserId     String
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  producer            Producer           @relation(fields: [producerId], references: [id])
+  stand               Stand              @relation(fields: [standId], references: [id])
+  product             Product            @relation(fields: [productId], references: [id])
+  createdBy           User               @relation("DeliveryPlanCreatedBy", fields: [createdByUserId], references: [id])
+
+  @@index([producerId])
+  @@index([standId, status])
+  @@index([plannedArrivalAt])
+}
+
+model StaffStandAssignment {
+  id        String   @id @default(uuid())
+  userId    String
+  standId   String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+  stand     Stand    @relation(fields: [standId], references: [id])
+
+  @@unique([userId, standId])
+  @@index([standId])
+}
