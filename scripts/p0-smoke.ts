@@ -49,7 +49,7 @@ async function assertDatabaseReachable() {
     await prisma.$queryRaw`SELECT 1`;
   } catch {
     throw new Error(
-      "Lokale PostgreSQL-Datenbank ist nicht erreichbar. Starte `npm run db:up` oder stelle die DATABASE_URL aus .env.example manuell bereit, dann `npm run prisma:migrate`, `npm run prisma:seed` und erneut `npm run smoke:p0` ausfuehren.",
+      "Lokale PostgreSQL-Datenbank ist nicht erreichbar. Stelle die DATABASE_URL aus .env.example mit einem lokalen PostgreSQL-Dienst bereit, dann `npm run db:check`, `npm run prisma:migrate`, `npm run prisma:seed` und erneut `npm run smoke:p0` ausfuehren.",
     );
   }
 }

@@ -40,13 +40,13 @@
 | N-04 | Stripe PaymentIntent im Testmodus integrieren | SDK, Signatur, Idempotenz und Persistenz-Skeleton vorhanden; Stripe CLI/E2E offen |
 | N-05 | QR-Code-Rendering für Kundenansicht ergänzen | Done: gespeicherter Hash + Nonce, kein Klartexttoken |
 | N-06 | Staff-Scanner mit Browser-QR-Library ergänzen | API/Transaktion vorhanden; Browser-Kamera noch offen |
-| N-07 | Admin-Formulare mit serverseitiger Validierung implementieren | Inventory PATCH DB-backed; Stand/Product CRUD offen |
+| N-07 | Admin-Formulare mit serverseitiger Validierung implementieren | Inventory PATCH und Stand/Product API DB-backed; UI-Formular-Submit offen |
 | N-08 | Cron-Infrastruktur für Expiry und Reminder festlegen | Jobs implementiert; Scheduler/Worker-Ausfuehrung offen |
 | N-09 | Customer Reservierungsformular an Order-API anbinden | Done: Produktseite erstellt Order und leitet zum Checkout |
 | N-10 | Staff Scan/Pickup UI an API anbinden | Partial: Token-Scan und Fallback-Pickup angebunden; Browser-Kamera offen |
 | N-11 | Staff Bestand/Lieferung an Inventory-API anbinden | Done: Staff Inventory und Delivery schreiben InventoryEvents |
-| N-12 | Admin Inventory/Orders von Mockdaten loesen | Partial: Tabellen lesen Prisma; Product/Stand Listen noch mockbasiert |
-| N-13 | Lokales PostgreSQL-Setup und P0-Smoke-Runner stabilisieren | Done: Docker Compose, npm-Scripts und `smoke:p0` angelegt |
+| N-12 | Admin Inventory/Orders von Mockdaten loesen | Partial: Tabellen lesen Prisma; Admin Stand/Product API und Listen sind DB-backed |
+| N-13 | Lokalen PostgreSQL-Check und P0-Smoke-Runner stabilisieren | Done: kein Docker; `db:check` und `smoke:p0` angelegt |
 
 ## Payment Follow-up
 

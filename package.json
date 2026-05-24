@@ -14,9 +14,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:studio": "prisma studio",
-    "db:up": "docker compose up -d db",
-    "db:down": "docker compose down",
-    "db:logs": "docker compose logs -f db",
+    "db:check": "tsx scripts/db-check.ts",
     "smoke:p0": "tsx scripts/p0-smoke.ts"
   },
   "dependencies": {

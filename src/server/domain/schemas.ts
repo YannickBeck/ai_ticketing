@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+const openingHoursSchema = z.record(z.string(), z.string());
+const standStatusSchema = z.enum(["open", "closed", "seasonal_pause"]);
+
 export const orderItemInputSchema = z.object({
   productId: z.string().min(1),
   quantity: z.number().positive(),
@@ -64,3 +67,31 @@ export const phoneVerifyConfirmSchema = z.object({
   phoneNumber: z.string().min(6),
   code: z.string().min(4).max(12),
 });
+
+export const adminStandCreateSchema = z.object({
+  producerId: z.string().min(1).optional(),
+  name: z.string().trim().min(2),
+  addressLine: z.string().trim().min(2),
+  postalCode: z.string().trim().min(3),
+  city: z.string().trim().min(2),
+  latitude: z.coerce.number().min(-90).max(90),
+  longitude: z.coerce.number().min(-180).max(180),
+  openingHours: openingHoursSchema.default({}),
+  status: standStatusSchema.default("open"),
+  publicNote: z.string().max(500).nullable().optional(),
+});
+
+export const adminStandPatchSchema = adminStandCreateSchema.omit({ producerId: true }).partial();
+
+export const adminProductCreateSchema = z.object({
+  producerId: z.string().min(1).optional(),
+  name: z.string().trim().min(2),
+  category: z.string().trim().min(2),
+  unit: z.string().trim().min(1),
+  priceCents: z.coerce.number().int().nonnegative(),
+  currency: z.literal("EUR").default("EUR"),
+  active: z.boolean().default(true),
+  description: z.string().max(1000).nullable().optional(),
+});
+
+export const adminProductPatchSchema = adminProductCreateSchema.omit({ producerId: true }).partial();

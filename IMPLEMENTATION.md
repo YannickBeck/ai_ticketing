@@ -29,7 +29,7 @@ Prisma 7 nutzt `prisma.config.ts` fuer CLI-Konfiguration und im Runtime-Pfad den
 ```bash
 npm install
 cp .env.example .env.local
-npm run db:up
+npm run db:check
 npm run prisma:migrate
 npm run prisma:seed
 npm run prisma:generate
@@ -47,13 +47,13 @@ npm install
 Für eine echte Datenbank:
 
 ```bash
-npm run db:up
+npm run db:check
 npm run prisma:migrate
 npm run prisma:seed
 npm run smoke:p0
 ```
 
-`db:up` nutzt `docker-compose.yml` fuer lokale PostgreSQL-Entwicklung. Wenn Docker nicht installiert ist, muss PostgreSQL manuell unter der `DATABASE_URL` aus `.env.example` bereitstehen.
+Die lokale Datenbank wird nicht durch das Projekt gestartet. `db:check` prueft die erreichbare PostgreSQL-Instanz aus `DATABASE_URL`; PostgreSQL muss lokal oder als eigener Entwicklungsdienst bereitstehen.
 
 ## Checks
 
@@ -93,6 +93,7 @@ docs/data-model         Datenmodell-Dokumentation
 | API-Routen | Skeletons für Customer, Admin, Staff, Payment und WhatsApp |
 | Prisma | MVP-Schema mit Kernentitäten |
 | Domain Services | Skeletons mit ersten Kernfunktionen und PaymentRepository |
+| Admin Stand/Product | API und Listen DB-backed; UI-Formular-Submit offen |
 | Payment | Stripe PaymentIntent-Skeleton, `PaymentEvent`, Webhook-Statusguards, QR/Notification nach Success |
 | WhatsApp | P1-Provider-Adapter und Webhook-Skeleton |
 | Tests | Erste Tests für Inventory und Notification-Regeln |

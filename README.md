@@ -104,14 +104,16 @@ Erwarteter Entwicklungsablauf:
 ```bash
 npm install
 cp .env.example .env.local
-npm run db:up
+npm run db:check
 npm run prisma:migrate
 npm run prisma:seed
 npm run smoke:p0
 npm run dev
 ```
 
-`npm run db:up` nutzt Docker Compose und startet PostgreSQL passend zur `DATABASE_URL` aus `.env.example`. Falls Docker lokal nicht verfügbar ist, muss PostgreSQL manuell mit Datenbank `spargelstand_app`, User `postgres` und Passwort `postgres` laufen.
+Die lokale Entwicklung nutzt bewusst keinen Docker-Pfad. PostgreSQL muss lokal installiert oder als eigener Dienst erreichbar sein. Die Standardwerte aus `.env.example` erwarten Datenbank `spargelstand_app`, User `postgres`, Passwort `postgres` auf `localhost:5432`.
+
+`npm run db:check` prüft nur die Verbindung zur `DATABASE_URL`; der Befehl startet keine Datenbank.
 
 `npm run smoke:p0` prüft den DB-backed Kernfluss lokal: Reservierung, Inventory-Hold, Payment-Success-Simulation, QR-Erzeugung, Staff-Scan und Pickup. Der Smoke-Test gibt keine QR-Klartexte, Payment-Payloads oder vollständigen Telefonnummern aus.
 

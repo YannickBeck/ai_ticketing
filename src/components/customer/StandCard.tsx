@@ -1,10 +1,20 @@
 import { ArrowRight, MapPin, Navigation } from "lucide-react";
 import Link from "next/link";
 
-import type { MockStand } from "@/server/db/mockData";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 
-export function StandCard({ stand }: { stand: MockStand }) {
+export type StandCardData = {
+  id: string;
+  name: string;
+  address: string;
+  city: string;
+  latitude: number;
+  longitude: number;
+  status: string;
+  distanceMeters: number;
+};
+
+export function StandCard({ stand }: { stand: StandCardData }) {
   return (
     <article className="card">
       <div className="card-header">

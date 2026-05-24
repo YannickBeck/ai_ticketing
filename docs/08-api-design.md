@@ -102,9 +102,13 @@ Response:
 | Methode | Endpoint | Zweck | Auth | RBAC |
 | --- | --- | --- | --- | --- |
 | GET | `/api/v1/admin/dashboard` | Tagesüberblick | Ja | Eigener Produzent |
+| GET | `/api/v1/admin/stands` | Stände listen | Ja | Eigener Produzent |
 | POST | `/api/v1/admin/stands` | Stand anlegen | Ja | Spargelbauer/Admin |
+| GET | `/api/v1/admin/stands/{standId}` | Stand anzeigen | Ja | Eigener Stand |
 | PATCH | `/api/v1/admin/stands/{standId}` | Stand bearbeiten | Ja | Eigener Stand |
+| GET | `/api/v1/admin/products` | Produkte listen | Ja | Eigener Produzent |
 | POST | `/api/v1/admin/products` | Produkt anlegen | Ja | Eigener Produzent |
+| GET | `/api/v1/admin/products/{productId}` | Produkt anzeigen | Ja | Eigenes Produkt |
 | PATCH | `/api/v1/admin/products/{productId}` | Produkt bearbeiten | Ja | Eigenes Produkt |
 | PATCH | `/api/v1/admin/inventory/{standId}/{productId}` | Bestand ändern | Ja | Eigener Stand |
 | GET | `/api/v1/admin/orders?standId=&status=&date=` | Reservierungen anzeigen | Ja | Eigene Stände |

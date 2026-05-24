@@ -173,7 +173,7 @@ Das MVP ist testseitig abnahmebereit, wenn:
 | Unit/Integration | Vitest oder Jest |
 | API Tests | Supertest oder direkte Route-Handler-Tests |
 | E2E | Playwright |
-| Datenbank | Test-PostgreSQL per Docker oder CI-Service |
+| Datenbank | Lokales Test-PostgreSQL oder CI-Service |
 | Payment | Stripe CLI und Stripe Testmodus |
 | WhatsApp | Provider-Sandbox oder Mock-Adapter für Template- und Webhook-Tests |
 | Coverage | In CI erfassen, aber kritische Pfade priorisieren |
