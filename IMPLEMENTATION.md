@@ -94,6 +94,7 @@ docs/data-model         Datenmodell-Dokumentation
 | Prisma | MVP-Schema mit Kernentitäten |
 | Domain Services | Skeletons mit ersten Kernfunktionen und PaymentRepository |
 | Admin Stand/Product | API und Listen DB-backed; UI-Formular-Submit offen |
+| Admin Orders/Notifications | Dashboard, Orders API und Notification-Log DB-backed mit Scope-Filter |
 | Payment | Stripe PaymentIntent-Skeleton, `PaymentEvent`, Webhook-Statusguards, QR/Notification nach Success |
 | WhatsApp | P1-Provider-Adapter und Webhook-Skeleton |
 | Tests | Erste Tests für Inventory und Notification-Regeln |

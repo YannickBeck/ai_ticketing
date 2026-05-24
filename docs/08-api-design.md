@@ -113,7 +113,7 @@ Response:
 | PATCH | `/api/v1/admin/inventory/{standId}/{productId}` | Bestand ändern | Ja | Eigener Stand |
 | GET | `/api/v1/admin/orders?standId=&status=&date=` | Reservierungen anzeigen | Ja | Eigene Stände |
 | GET | `/api/v1/admin/orders/{orderId}/notifications` | Notification-Historie einer Order anzeigen | Ja | Eigene Stände |
-| POST | `/api/v1/admin/orders/{orderId}/notify` | Freigegebene Statusnachricht, z. B. Lieferverzögerung, auslösen | Ja | Eigene Stände |
+| POST | `/api/v1/admin/orders/{orderId}/notify` | Freigegebene Statusnachricht, z. B. Lieferverzögerung, als Queue-Record vormerken | Ja | Eigene Stände |
 | GET | `/api/v1/admin/notifications` | Notification-Log filtern | Ja | Eigener Produzent oder Plattformadmin |
 | GET | `/api/v1/admin/notifications/failed` | Fehlgeschlagene Benachrichtigungen anzeigen | Ja | Eigener Produzent oder Plattformadmin |
 | GET | `/api/v1/admin/analytics/demand` | Nachfrageübersicht | Ja | Eigener Produzent |
@@ -320,4 +320,6 @@ Fehlerformat:
 | Admin | Rolle `producer_admin`, `producer_id` muss passen |
 | Staff | Rolle `staff`, `stand_id` muss zugeordnet sein |
 | Platform Admin | Rolle `platform_admin`, zusätzliche Audit-Logs |
+
+Admin Notification Responses enthalten maskierte Empfängerwerte. Provider-Versand ist vom Order-Flow entkoppelt; API-Operationen schreiben zuerst `Notification`-Records.
 | Webhooks | Keine User-Session, Provider-Signatur und Idempotenz |

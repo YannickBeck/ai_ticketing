@@ -4,7 +4,7 @@ Basis: `/api/v1/admin`
 
 | Methode | Endpoint | Zweck | Status |
 | --- | --- | --- | --- |
-| GET | `/dashboard` | Tagesüberblick | Skeleton |
+| GET | `/dashboard` | Tagesüberblick | DB-backed |
 | GET | `/stands` | Stände listen | DB-backed |
 | POST | `/stands` | Stand anlegen | DB-backed |
 | GET | `/stands/{standId}` | Stand anzeigen | DB-backed |
@@ -14,13 +14,15 @@ Basis: `/api/v1/admin`
 | GET | `/products/{productId}` | Produkt anzeigen | DB-backed |
 | PATCH | `/products/{productId}` | Produkt bearbeiten | DB-backed |
 | PATCH | `/inventory/{standId}/{productId}` | Bestand ändern | DB-backed |
-| GET | `/orders?standId=&status=&date=` | Reservierungen anzeigen | Skeleton |
-| GET | `/orders/{orderId}/notifications` | Notification-Historie | Skeleton |
-| POST | `/orders/{orderId}/notify` | Freigegebene Statusnachricht | Skeleton |
-| GET | `/notifications` | Notification Log | Skeleton |
-| GET | `/notifications/failed` | Fehlgeschlagene Nachrichten | Skeleton |
+| GET | `/orders?standId=&status=&date=` | Reservierungen anzeigen | DB-backed |
+| GET | `/orders/{orderId}/notifications` | Notification-Historie | DB-backed |
+| POST | `/orders/{orderId}/notify` | Freigegebene Statusnachricht vormerken | DB-backed Queue-Record |
+| GET | `/notifications?channel=&status=&orderId=` | Notification Log | DB-backed |
+| GET | `/notifications/failed` | Fehlgeschlagene Nachrichten | DB-backed |
 | GET | `/analytics/demand` | Nachfrageübersicht | Skeleton |
 | GET | `/delivery-suggestions` | Lieferempfehlungen | Skeleton |
 | POST | `/staff` | Mitarbeiter anlegen | Skeleton |
 
 Admins sind auf den eigenen `producer_id`-Scope begrenzt. Plattformadmins müssen bei Create-Operationen explizit `producerId` übergeben. Plattformweite Support- und Audit-Sichten bleiben ein späterer Schritt.
+
+Notification-Antworten liefern maskierte Empfängerwerte. Roh-Telefonnummern werden nicht in Admin-Responses ausgegeben.

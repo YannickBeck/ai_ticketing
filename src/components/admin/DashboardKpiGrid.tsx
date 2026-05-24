@@ -1,15 +1,30 @@
 import { AlertTriangle, Bell, PackageCheck, ShoppingBasket } from "lucide-react";
 
-const metrics = [
-  { label: "Reservierungen heute", value: "12", icon: ShoppingBasket },
-  { label: "Offene Abholungen", value: "7", icon: PackageCheck },
-  { label: "Kritische Bestände", value: "3", icon: AlertTriangle },
-  { label: "Notification Fehler", value: "0", icon: Bell },
-];
+import { demoUsers } from "@/server/auth/permissions";
+import { adminQueryService } from "@/server/services/AdminQueryService";
 
-export function DashboardKpiGrid() {
+const fallbackMetrics = {
+  reservationsToday: 0,
+  openPickups: 0,
+  criticalInventory: 0,
+  failedNotifications: 0,
+};
+
+export async function DashboardKpiGrid() {
+  const result = await adminQueryService
+    .getDashboard(demoUsers.producer_admin)
+    .then((metrics) => ({ metrics, failed: false }))
+    .catch(() => ({ metrics: fallbackMetrics, failed: true }));
+
+  const metrics = [
+    { label: "Reservierungen heute", value: result.metrics.reservationsToday, icon: ShoppingBasket },
+    { label: "Offene Abholungen", value: result.metrics.openPickups, icon: PackageCheck },
+    { label: "Kritische Bestände", value: result.metrics.criticalInventory, icon: AlertTriangle },
+    { label: "Notification Fehler", value: result.metrics.failedNotifications, icon: Bell },
+  ];
+
   return (
-    <section className="grid four" aria-label="Kennzahlen">
+    <section className="grid four" aria-label={result.failed ? "Kennzahlen nicht geladen" : "Kennzahlen"}>
       {metrics.map((metric) => {
         const Icon = metric.icon;
         return (

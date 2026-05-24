@@ -1,14 +1,17 @@
 import { ApiError, jsonCreated, jsonOk, parseJson, skeleton } from "@/server/api/http";
 import { requireRole } from "@/server/auth/permissions";
 import { requireUser } from "@/server/auth/requireUser";
-import { mockNotifications, mockOrders } from "@/server/db/mockData";
 import {
+  adminNotificationFiltersSchema,
+  adminNotifyOrderSchema,
+  adminOrderFiltersSchema,
   adminProductCreateSchema,
   adminProductPatchSchema,
   adminStandCreateSchema,
   adminStandPatchSchema,
   inventoryUpdateSchema,
 } from "@/server/domain/schemas";
+import { adminQueryService } from "@/server/services/AdminQueryService";
 import { deliveryPlanningService } from "@/server/services/DeliveryPlanningService";
 import { inventoryMutationService } from "@/server/services/InventoryMutationService";
 import { productService } from "@/server/services/ProductService";
@@ -18,13 +21,7 @@ export async function handleAdminDashboard(request: Request) {
   const user = await requireUser(request);
   requireRole(user, ["producer_admin", "platform_admin"]);
 
-  return jsonOk({
-    reservationsToday: mockOrders.length,
-    openPickups: mockOrders.filter((order) => order.status === "confirmed" || order.status === "ready_for_pickup").length,
-    criticalInventory: 1,
-    failedNotifications: mockNotifications.filter((notification) => notification.status === "failed").length,
-    scope: user.producerId ?? "platform",
-  });
+  return jsonOk(await adminQueryService.getDashboard(user));
 }
 
 export async function handleCreateStand(request: Request) {
@@ -96,42 +93,41 @@ export async function handleAdminOrders(request: Request) {
   const user = await requireUser(request);
   requireRole(user, ["producer_admin", "platform_admin"]);
   const url = new URL(request.url);
+  const filters = adminOrderFiltersSchema.parse(Object.fromEntries(url.searchParams.entries()));
 
   return jsonOk({
-    filters: Object.fromEntries(url.searchParams.entries()),
-    items: mockOrders,
+    filters,
+    items: await adminQueryService.listOrders(user, filters),
   });
 }
 
 export async function handleAdminOrderNotifications(request: Request, orderId: string) {
   const user = await requireUser(request);
   requireRole(user, ["producer_admin", "platform_admin"]);
-  return jsonOk(mockNotifications.filter((notification) => notification.orderId === orderId));
+  return jsonOk(await adminQueryService.listNotifications(user, { orderId }));
 }
 
 export async function handleAdminNotifyOrder(request: Request, orderId: string) {
   const user = await requireUser(request);
   requireRole(user, ["producer_admin", "platform_admin"]);
-  const body = await parseJson(request);
+  const input = adminNotifyOrderSchema.parse(await parseJson(request));
 
-  return jsonCreated({
-    orderId,
-    status: "notification_pending",
-    body,
-    implementationNote: "Nur freigegebene Templates fuer Lieferverzoegerung oder Statusaenderung zulassen.",
-  });
+  return jsonCreated(await adminQueryService.queueOrderNotification(user, orderId, input));
 }
 
 export async function handleAdminNotifications(request: Request) {
   const user = await requireUser(request);
   requireRole(user, ["producer_admin", "platform_admin"]);
-  return jsonOk(mockNotifications);
+  const url = new URL(request.url);
+  const filters = adminNotificationFiltersSchema.parse(Object.fromEntries(url.searchParams.entries()));
+
+  return jsonOk(await adminQueryService.listNotifications(user, filters));
 }
 
 export async function handleAdminFailedNotifications(request: Request) {
   const user = await requireUser(request);
   requireRole(user, ["producer_admin", "platform_admin"]);
-  return jsonOk(mockNotifications.filter((notification) => notification.status === "failed"));
+  return jsonOk(await adminQueryService.listNotifications(user, { status: "failed" }));
 }
 
 export async function handleDemandAnalytics(request: Request) {

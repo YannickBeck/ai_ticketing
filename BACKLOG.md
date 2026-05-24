@@ -45,7 +45,8 @@
 | N-09 | Customer Reservierungsformular an Order-API anbinden | Done: Produktseite erstellt Order und leitet zum Checkout |
 | N-10 | Staff Scan/Pickup UI an API anbinden | Partial: Token-Scan und Fallback-Pickup angebunden; Browser-Kamera offen |
 | N-11 | Staff Bestand/Lieferung an Inventory-API anbinden | Done: Staff Inventory und Delivery schreiben InventoryEvents |
-| N-12 | Admin Inventory/Orders von Mockdaten loesen | Partial: Tabellen lesen Prisma; Admin Stand/Product API und Listen sind DB-backed |
+| N-12 | Admin Inventory/Orders von Mockdaten loesen | Done: Dashboard, Inventory, Orders, Stand/Product und Notification-Log lesen Prisma |
+| N-14 | Admin Notification Queue an Provider-Worker koppeln | Open: Records werden geschrieben; Versand bleibt bewusst entkoppelt |
 | N-13 | Lokalen PostgreSQL-Check und P0-Smoke-Runner stabilisieren | Done: kein Docker; `db:check` und `smoke:p0` angelegt |
 
 ## Payment Follow-up

@@ -2,6 +2,27 @@ import { z } from "zod";
 
 const openingHoursSchema = z.record(z.string(), z.string());
 const standStatusSchema = z.enum(["open", "closed", "seasonal_pause"]);
+const orderStatusSchema = z.enum([
+  "draft",
+  "pending_payment",
+  "confirmed",
+  "ready_for_pickup",
+  "picked_up",
+  "cancelled",
+  "expired",
+  "refunded",
+]);
+const notificationChannelSchema = z.enum(["email", "whatsapp", "push"]);
+const notificationStatusSchema = z.enum(["pending", "sent", "delivered", "failed", "cancelled"]);
+const notificationTypeSchema = z.enum([
+  "order_confirmed",
+  "payment_confirmed",
+  "pickup_reminder",
+  "order_ready",
+  "order_changed",
+  "picked_up",
+  "order_cancelled",
+]);
 
 export const orderItemInputSchema = z.object({
   productId: z.string().min(1),
@@ -95,3 +116,21 @@ export const adminProductCreateSchema = z.object({
 });
 
 export const adminProductPatchSchema = adminProductCreateSchema.omit({ producerId: true }).partial();
+
+export const adminOrderFiltersSchema = z.object({
+  standId: z.string().min(1).optional(),
+  status: orderStatusSchema.optional(),
+  date: z.string().date().optional(),
+});
+
+export const adminNotificationFiltersSchema = z.object({
+  orderId: z.string().min(1).optional(),
+  channel: notificationChannelSchema.optional(),
+  status: notificationStatusSchema.optional(),
+});
+
+export const adminNotifyOrderSchema = z.object({
+  channel: z.enum(["email", "whatsapp"]).default("email"),
+  type: notificationTypeSchema.default("order_changed"),
+  templateKey: z.string().min(3).max(120).optional(),
+});
