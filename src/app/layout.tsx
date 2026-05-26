@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { GeistSans } from "geist/font/sans";
 
-import { AppNav } from "@/components/shared/AppNav";
+import { AppSidebar } from "@/components/shared/AppSidebar";
+import { Providers } from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -11,12 +13,16 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="de">
+    <html lang="de" className={GeistSans.variable} suppressHydrationWarning>
       <body>
-        <main className="app-shell">
-          <AppNav />
-          {children}
-        </main>
+        <Providers>
+          <div className="app-layout">
+            <AppSidebar />
+            <div className="app-main">
+              <div className="app-content">{children}</div>
+            </div>
+          </div>
+        </Providers>
       </body>
     </html>
   );
