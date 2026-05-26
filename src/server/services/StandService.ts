@@ -4,9 +4,8 @@ import {
   StandStatus as PrismaStandStatus,
 } from "@prisma/client";
 
-import { ApiError, parseSearchNumber } from "@/server/api/http";
+import { ApiError } from "@/server/api/http";
 import { requireProducerScope } from "@/server/auth/permissions";
-import { mockInventory, mockProducts, mockStands } from "@/server/db/mockData";
 import { prisma } from "@/server/db/prisma";
 import type { SessionUser, StandStatus } from "@/server/domain/types";
 import { inventoryService } from "@/server/services/InventoryService";
@@ -34,33 +33,28 @@ export class StandService {
   constructor(private readonly db: PrismaClient = prisma) {}
 
   async searchStands(url: URL) {
-    const radius = parseSearchNumber(url.searchParams.get("radius"), 15000);
     const openNow = url.searchParams.get("openNow") === "true";
 
-    return mockStands
-      .filter((stand) => stand.distanceMeters <= radius)
-      .filter((stand) => (openNow ? stand.status === "open" : true))
-      .map((stand) => ({
-        ...stand,
-        availabilitySummary: this.getAvailabilitySummary(stand.id),
-      }));
+    const stands = await this.db.stand.findMany({
+      where: openNow ? { status: PrismaStandStatus.OPEN } : undefined,
+      include: { inventories: true },
+      orderBy: [{ city: "asc" }, { name: "asc" }],
+    });
+
+    return stands.map((stand) => this.toStandDto(stand));
   }
 
   async getStand(standId: string) {
-    const stand = mockStands.find((item) => item.id === standId);
+    const stand = await this.db.stand.findUnique({
+      where: { id: standId },
+      include: { inventories: true },
+    });
 
     if (!stand) {
       throw new ApiError("NOT_FOUND", "Stand wurde nicht gefunden.", 404);
     }
 
-    return {
-      ...stand,
-      openingHours: {
-        monday: "08:00-18:00",
-        saturday: "08:00-14:00",
-      },
-      availabilitySummary: this.getAvailabilitySummary(stand.id),
-    };
+    return this.toStandDto(stand);
   }
 
   async listAdminStands(producerId?: string) {
@@ -142,41 +136,34 @@ export class StandService {
     return this.toStandDto(stand);
   }
 
-  getAvailabilitySummary(standId: string) {
-    const inventories = mockInventory.filter((item) => item.standId === standId);
-
-    return inventories.reduce(
-      (summary, item) => {
-        const status = inventoryService.calculateStatus(item);
-        return {
-          availableProducts: summary.availableProducts + (status === "available" ? 1 : 0),
-          lowStockProducts: summary.lowStockProducts + (status === "low_stock" ? 1 : 0),
-          outOfStockProducts:
-            summary.outOfStockProducts + (status === "out_of_stock" || status === "next_delivery_expected" ? 1 : 0),
-        };
-      },
-      { availableProducts: 0, lowStockProducts: 0, outOfStockProducts: 0 },
-    );
-  }
-
   async getProductsForStand(standId: string) {
     await this.getStand(standId);
 
-    return mockInventory
-      .filter((inventory) => inventory.standId === standId)
-      .map((inventory) => {
-        const product = mockProducts.find((item) => item.id === inventory.productId);
-        return {
-          inventoryId: inventory.id,
-          product,
-          stockQuantity: inventory.stockQuantity,
-          reservedQuantity: inventory.reservedQuantity,
-          safetyBuffer: inventory.safetyBuffer,
-          availableQuantity: inventoryService.calculateAvailableQuantity(inventory),
-          status: inventoryService.calculateStatus(inventory),
-          nextDeliveryAt: inventory.nextDeliveryAt,
-        };
-      });
+    const inventories = await this.db.inventory.findMany({
+      where: { standId },
+      include: { product: true },
+    });
+
+    return inventories.map((inventory) => {
+      const snapshot = {
+        stockQuantity: Number(inventory.stockQuantity),
+        reservedQuantity: Number(inventory.reservedQuantity),
+        safetyBuffer: Number(inventory.safetyBuffer),
+        lowStockThreshold: Number(inventory.lowStockThreshold),
+        nextDeliveryAt: inventory.nextDeliveryAt?.toISOString() ?? null,
+        manuallyOutOfStock: inventory.status === "OUT_OF_STOCK",
+      };
+      return {
+        inventoryId: inventory.id,
+        product: { ...inventory.product, currency: inventory.product.currency as "EUR" },
+        stockQuantity: Number(inventory.stockQuantity),
+        reservedQuantity: Number(inventory.reservedQuantity),
+        safetyBuffer: Number(inventory.safetyBuffer),
+        availableQuantity: inventoryService.calculateAvailableQuantity(snapshot),
+        status: inventoryService.calculateStatus(snapshot),
+        nextDeliveryAt: inventory.nextDeliveryAt?.toISOString() ?? null,
+      };
+    });
   }
 
   private resolveWritableProducerId(user: SessionUser, requestedProducerId?: string) {

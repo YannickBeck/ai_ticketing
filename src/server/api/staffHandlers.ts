@@ -1,4 +1,4 @@
-import { jsonOk, parseJson } from "@/server/api/http";
+import { ApiError, jsonOk, parseJson } from "@/server/api/http";
 import { requireRole, requireStandScope } from "@/server/auth/permissions";
 import { requireUser } from "@/server/auth/requireUser";
 import {
@@ -15,7 +15,10 @@ export async function handleStaffOrders(request: Request) {
   const user = await requireUser(request);
   requireRole(user, ["staff", "platform_admin"]);
   const url = new URL(request.url);
-  const standId = url.searchParams.get("standId") ?? user.standIds?.[0] ?? "stand_mannheim_ost";
+  const standId = url.searchParams.get("standId") ?? user.standIds?.[0];
+  if (!standId) {
+    throw new ApiError("FORBIDDEN", "Kein Stand zugewiesen.", 403);
+  }
   requireStandScope(user, standId);
 
   return jsonOk(await reservationService.listStaffOrders(standId));

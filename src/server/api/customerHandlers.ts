@@ -1,7 +1,7 @@
 import { ApiError, jsonCreated, jsonOk, parseJson } from "@/server/api/http";
 import { canReadOwnOrder } from "@/server/auth/permissions";
 import { requireUser } from "@/server/auth/requireUser";
-import { mockNotifications } from "@/server/db/mockData";
+import { prisma } from "@/server/db/prisma";
 import {
   createOrderSchema,
   notificationPreferenceSchema,
@@ -66,8 +66,17 @@ export async function handleCancelOrder(request: Request, orderId: string) {
 }
 
 export async function handleGetOrderNotifications(request: Request, orderId: string) {
-  await requireUser(request);
-  return jsonOk(mockNotifications.filter((notification) => notification.orderId === orderId));
+  const user = await requireUser(request);
+  const order = await prisma.order.findUnique({ where: { id: orderId }, select: { customerId: true } });
+  if (!order) throw new ApiError("NOT_FOUND", "Bestellung nicht gefunden.", 404);
+  if (!canReadOwnOrder(user, order.customerId)) {
+    throw new ApiError("FORBIDDEN", "Benachrichtigungen sind nicht im erlaubten Scope.", 403);
+  }
+  const notifications = await prisma.notification.findMany({
+    where: { orderId },
+    orderBy: { createdAt: "desc" },
+  });
+  return jsonOk(notifications);
 }
 
 export async function handleUpdateNotificationPreferences(request: Request) {
