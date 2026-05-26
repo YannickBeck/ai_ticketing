@@ -6,8 +6,10 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
+    // Use direct connection for migrations (not the PgBouncer pooler)
     url:
+      process.env.DIRECT_URL ??
       process.env.DATABASE_URL ??
-      "postgresql://postgres:postgres@localhost:5432/spargelstand_app?schema=public",
+      "postgresql://postgres:postgres@localhost:5432/spargelstand_app",
   },
 });
