@@ -1,25 +1,40 @@
 import { ApiError } from "@/server/api/http";
-import { demoUsers } from "@/server/auth/permissions";
-import type { SessionUser, UserRole } from "@/server/domain/types";
+import { prisma } from "@/server/db/prisma";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { SessionUser } from "@/server/domain/types";
 
-const roles: UserRole[] = ["customer", "producer_admin", "staff", "platform_admin"];
+export async function getCurrentUser(_request?: Request): Promise<SessionUser | null> {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user: authUser },
+  } = await supabase.auth.getUser();
 
-export async function getCurrentUser(request?: Request): Promise<SessionUser> {
-  const requestedRole = request?.headers.get("x-demo-role") as UserRole | null;
+  if (!authUser) return null;
 
-  if (requestedRole && roles.includes(requestedRole)) {
-    return demoUsers[requestedRole];
-  }
+  const user = await prisma.user.findUnique({
+    where: { id: authUser.id },
+    select: {
+      id: true,
+      role: true,
+      producerId: true,
+      staffStandAssignments: { select: { standId: true } },
+    },
+  });
 
-  return demoUsers.customer;
+  if (!user) return null;
+
+  return {
+    id: user.id,
+    role: user.role as SessionUser["role"],
+    producerId: user.producerId ?? undefined,
+    standIds: user.staffStandAssignments.map((a) => a.standId),
+  };
 }
 
-export async function requireUser(request?: Request): Promise<SessionUser> {
-  const user = await getCurrentUser(request);
-
+export async function requireUser(_request?: Request): Promise<SessionUser> {
+  const user = await getCurrentUser();
   if (!user) {
     throw new ApiError("AUTH_REQUIRED", "Authentifizierung erforderlich.", 401);
   }
-
   return user;
 }

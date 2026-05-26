@@ -1,6 +1,6 @@
 import { AlertTriangle, Bell, PackageCheck, ShoppingBasket } from "lucide-react";
 
-import { demoUsers } from "@/server/auth/permissions";
+import { getCurrentUser } from "@/server/auth/requireUser";
 import { adminQueryService } from "@/server/services/AdminQueryService";
 
 const fallbackMetrics = {
@@ -11,10 +11,14 @@ const fallbackMetrics = {
 };
 
 export async function DashboardKpiGrid() {
-  const result = await adminQueryService
-    .getDashboard(demoUsers.producer_admin)
-    .then((metrics) => ({ metrics, failed: false }))
-    .catch(() => ({ metrics: fallbackMetrics, failed: true }));
+  const user = await getCurrentUser();
+  const result =
+    user
+      ? await adminQueryService
+          .getDashboard(user)
+          .then((metrics) => ({ metrics, failed: false }))
+          .catch(() => ({ metrics: fallbackMetrics, failed: true }))
+      : { metrics: fallbackMetrics, failed: true };
 
   const metrics = [
     { label: "Reservierungen heute", value: result.metrics.reservationsToday, icon: ShoppingBasket },

@@ -1,12 +1,16 @@
 import { StatusBadge } from "@/components/shared/StatusBadge";
-import { demoUsers } from "@/server/auth/permissions";
+import { getCurrentUser } from "@/server/auth/requireUser";
 import { adminQueryService } from "@/server/services/AdminQueryService";
 
 export async function NotificationLogTable() {
-  const result = await adminQueryService
-    .listNotifications(demoUsers.producer_admin)
-    .then((items) => ({ items, failed: false }))
-    .catch(() => ({ items: [], failed: true }));
+  const user = await getCurrentUser();
+  const result =
+    user
+      ? await adminQueryService
+          .listNotifications(user)
+          .then((items) => ({ items, failed: false }))
+          .catch(() => ({ items: [], failed: true }))
+      : { items: [], failed: true };
 
   if (result.failed) {
     return (

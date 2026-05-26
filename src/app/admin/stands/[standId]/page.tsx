@@ -1,12 +1,16 @@
-import { demoUsers } from "@/server/auth/permissions";
+import { getCurrentUser } from "@/server/auth/requireUser";
 import { standService } from "@/server/services/StandService";
+import { redirect } from "next/navigation";
 
 type PageProps = { params: Promise<{ standId: string }> };
 
 export default async function AdminStandDetailPage({ params }: PageProps) {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+
   const { standId } = await params;
   const result = await standService
-    .getAdminStand(demoUsers.producer_admin, standId)
+    .getAdminStand(user, standId)
     .then((stand) => ({ stand, failed: false }))
     .catch(() => ({ stand: null, failed: true }));
 
@@ -18,8 +22,8 @@ export default async function AdminStandDetailPage({ params }: PageProps) {
           <h1>Stand nicht geladen</h1>
         </header>
         <div className="card stack">
-          <h2>Datenbank nicht erreichbar</h2>
-          <p className="muted">Der Stand kann erst nach Migration und Seed angezeigt werden.</p>
+          <h2>Stand nicht gefunden</h2>
+          <p className="muted">Der Stand existiert nicht oder du hast keinen Zugriff.</p>
         </div>
       </>
     );
