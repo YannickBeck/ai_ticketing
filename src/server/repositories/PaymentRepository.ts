@@ -16,6 +16,7 @@ import {
 import { ApiError } from "@/server/api/http";
 import { prisma } from "@/server/db/prisma";
 import type { SessionUser } from "@/server/domain/types";
+import { createEmailProvider } from "@/server/providers/EmailProvider";
 import type { StripePaymentEventResult } from "@/server/services/PaymentService";
 import { QRCodeService } from "@/server/services/QRCodeService";
 
@@ -381,6 +382,7 @@ export class PaymentRepository {
     }
 
     await this.createOrderConfirmedNotifications(tx, order.id, order.customerId);
+    await this.sendPendingNotifications(tx, order.id);
 
     return {
       duplicate: false,
@@ -541,6 +543,54 @@ export class PaymentRepository {
     }
   }
 
+  private async sendPendingNotifications(tx: Db, orderId: string) {
+    const pending = await tx.notification.findMany({
+      where: {
+        orderId,
+        status: NotificationStatus.PENDING,
+        channel: NotificationChannel.EMAIL,
+      },
+      include: { order: { include: { customer: true } } },
+    });
+
+    const emailProvider = createEmailProvider();
+
+    for (const notification of pending) {
+      try {
+        const vars: Record<string, string> = {
+          customerName: notification.order?.customer?.name ?? "",
+          orderNumber: notification.order?.id ?? "",
+          orderId: notification.orderId ?? "",
+        };
+
+        const result = await emailProvider.send({
+          to: notification.recipient,
+          subject: "Spargelstand Bestellung",
+          templateKey: notification.templateKey,
+          variables: vars,
+        });
+
+        await tx.notification.update({
+          where: { id: notification.id },
+          data: {
+            status: NotificationStatus.SENT,
+            providerMessageId: result.providerMessageId,
+            sentAt: new Date(),
+            provider: result.provider,
+          },
+        });
+      } catch {
+        await tx.notification.update({
+          where: { id: notification.id },
+          data: {
+            status: NotificationStatus.FAILED,
+            errorMessage: "Versand fehlgeschlagen",
+          },
+        });
+      }
+    }
+  }
+
   private async createOrderConfirmedNotifications(tx: Db, orderId: string, userId: string) {
     const existing = await tx.notification.findFirst({
       where: {
@@ -554,6 +604,11 @@ export class PaymentRepository {
       return;
     }
 
+    const user = await tx.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { email: true },
+    });
+
     await tx.notification.create({
       data: {
         userId,
@@ -561,7 +616,7 @@ export class PaymentRepository {
         channel: NotificationChannel.EMAIL,
         type: NotificationType.ORDER_CONFIRMED,
         templateKey: "email.order_confirmed.v1",
-        recipient: "customer-email-from-user-profile",
+        recipient: user.email,
         status: NotificationStatus.PENDING,
         provider: "email",
       },

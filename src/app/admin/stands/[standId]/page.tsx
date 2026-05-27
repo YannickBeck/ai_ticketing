@@ -1,8 +1,11 @@
+import { StandEditForm } from "@/components/admin/StandEditForm";
 import { getCurrentUser } from "@/server/auth/requireUser";
 import { standService } from "@/server/services/StandService";
 import { redirect } from "next/navigation";
 
 type PageProps = { params: Promise<{ standId: string }> };
+
+export const dynamic = "force-dynamic";
 
 export default async function AdminStandDetailPage({ params }: PageProps) {
   const user = await getCurrentUser();
@@ -37,19 +40,11 @@ export default async function AdminStandDetailPage({ params }: PageProps) {
         <span className="eyebrow">Admin Stand</span>
         <h1>{stand.name}</h1>
       </header>
-      <form className="card stack">
-        <label className="form-row">
-          Name
-          <input className="input" defaultValue={stand.name} />
-        </label>
-        <label className="form-row">
-          Öffentliche Notiz
-          <input className="input" defaultValue={stand.publicNote ?? ""} />
-        </label>
-        <button className="button primary" type="button">
-          Speichern
-        </button>
-      </form>
+      <StandEditForm
+        standId={stand.id}
+        initialName={stand.name}
+        initialPublicNote={stand.publicNote ?? ""}
+      />
     </>
   );
 }

@@ -7,10 +7,12 @@ import {
   adminOrderFiltersSchema,
   adminProductCreateSchema,
   adminProductPatchSchema,
+  adminStaffCreateSchema,
   adminStandCreateSchema,
   adminStandPatchSchema,
   inventoryUpdateSchema,
 } from "@/server/domain/schemas";
+import { prisma } from "@/server/db/prisma";
 import { adminQueryService } from "@/server/services/AdminQueryService";
 import { deliveryPlanningService } from "@/server/services/DeliveryPlanningService";
 import { inventoryMutationService } from "@/server/services/InventoryMutationService";
@@ -145,13 +147,56 @@ export async function handleDeliverySuggestions(request: Request) {
 export async function handleCreateStaff(request: Request) {
   const user = await requireUser(request);
   requireRole(user, ["producer_admin", "platform_admin"]);
-  const body = await parseJson(request);
+  const input = adminStaffCreateSchema.parse(await parseJson(request));
+
+  const stand = await prisma.stand.findUnique({
+    where: { id: input.standId },
+    select: { id: true, producerId: true },
+  });
+
+  if (!stand) {
+    throw new ApiError("NOT_FOUND", "Stand nicht gefunden.", 404);
+  }
+
+  if (user.role !== "platform_admin" && stand.producerId !== user.producerId) {
+    throw new ApiError("FORBIDDEN", "Stand liegt nicht im eigenen Produzenten-Scope.", 403);
+  }
+
+  const existing = await prisma.user.findUnique({
+    where: { email: input.email },
+    select: { id: true, role: true },
+  });
+
+  const staffUser = await prisma.$transaction(async (tx) => {
+    const newUser = existing
+      ? await tx.user.update({
+          where: { id: existing.id },
+          data: { role: "STAFF", producerId: stand.producerId },
+        })
+      : await tx.user.create({
+          data: {
+            email: input.email,
+            name: input.name,
+            role: "STAFF",
+            producerId: stand.producerId,
+          },
+        });
+
+    await tx.staffStandAssignment.upsert({
+      where: { userId_standId: { userId: newUser.id, standId: input.standId } },
+      create: { userId: newUser.id, standId: input.standId },
+      update: {},
+    });
+
+    return newUser;
+  });
 
   return jsonCreated({
-    status: "skeleton",
-    resource: "staff",
-    body,
-    implementationNote: "Naechster Schritt: User mit Rolle staff und StaffStandAssignment anlegen.",
+    id: staffUser.id,
+    email: staffUser.email,
+    name: staffUser.name,
+    role: staffUser.role,
+    standId: input.standId,
   });
 }
 

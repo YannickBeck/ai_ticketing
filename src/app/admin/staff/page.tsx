@@ -1,25 +1,26 @@
-export default function AdminStaffPage() {
+import { StaffCreateForm } from "@/components/admin/StaffCreateForm";
+import { getCurrentUser } from "@/server/auth/requireUser";
+import { standService } from "@/server/services/StandService";
+
+export const dynamic = "force-dynamic";
+
+export default async function AdminStaffPage() {
+  const user = await getCurrentUser();
+  const allStands = user
+    ? await standService
+        .listAdminStands(user.role === "platform_admin" ? undefined : user.producerId)
+        .catch(() => [])
+    : [];
+
+  const stands = allStands.map((s) => ({ id: s.id, name: s.name }));
+
   return (
     <>
       <header className="page-header">
         <span className="eyebrow">Admin</span>
         <h1>Mitarbeiter</h1>
       </header>
-      <form className="card stack">
-        <label className="form-row">
-          E-Mail
-          <input className="input" placeholder="stand@example.local" />
-        </label>
-        <label className="form-row">
-          Stand
-          <select className="input" defaultValue="stand_mannheim_ost">
-            <option value="stand_mannheim_ost">Sonnenhof Mannheim Ost</option>
-          </select>
-        </label>
-        <button className="button primary" type="button">
-          Mitarbeiter anlegen
-        </button>
-      </form>
+      <StaffCreateForm stands={stands} />
     </>
   );
 }

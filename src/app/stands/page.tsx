@@ -1,7 +1,12 @@
 import { StandCard } from "@/components/customer/StandCard";
-import { mockStands } from "@/server/db/mockData";
+import { standService } from "@/server/services/StandService";
 
-export default function StandsPage() {
+export const dynamic = "force-dynamic";
+
+export default async function StandsPage() {
+  const url = new URL("http://localhost/stands");
+  const stands = await standService.searchStands(url).catch(() => []);
+
   return (
     <>
       <header className="page-header">
@@ -10,7 +15,7 @@ export default function StandsPage() {
         <p className="lead">Sortiert nach Entfernung mit Öffnungsstatus und Reservierungsfähigkeit.</p>
       </header>
       <section className="grid two">
-        {mockStands.map((stand) => (
+        {stands.map((stand) => (
           <StandCard stand={stand} key={stand.id} />
         ))}
       </section>

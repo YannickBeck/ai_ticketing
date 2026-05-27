@@ -4,6 +4,7 @@ import {
   NotificationStatus,
   NotificationType,
   OrderStatus,
+  PaymentStatus,
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
@@ -326,6 +327,32 @@ export class AdminQueryService {
       case "refunded":
         return OrderStatus.REFUNDED;
     }
+  }
+
+  async getRevenueSummary(user: SessionUser) {
+    const where: Prisma.PaymentWhereInput = {
+      status: PaymentStatus.SUCCEEDED,
+      ...(user.role !== "platform_admin" && user.producerId
+        ? { order: { producerId: user.producerId } }
+        : {}),
+    };
+
+    const result = await this.db.payment.aggregate({
+      where,
+      _sum: {
+        productAmountCents: true,
+        serviceFeeCents: true,
+        amountTotalCents: true,
+      },
+      _count: true,
+    });
+
+    return {
+      totalCents: result._sum.amountTotalCents ?? 0,
+      productTotalCents: result._sum.productAmountCents ?? 0,
+      feesTotalCents: result._sum.serviceFeeCents ?? 0,
+      orderCount: result._count,
+    };
   }
 
   private toPrismaNotificationChannel(channel: DomainNotificationChannel) {

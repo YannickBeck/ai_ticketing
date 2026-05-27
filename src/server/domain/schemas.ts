@@ -117,6 +117,12 @@ export const adminProductCreateSchema = z.object({
 
 export const adminProductPatchSchema = adminProductCreateSchema.omit({ producerId: true }).partial();
 
+export const adminStaffCreateSchema = z.object({
+  email: z.string().email(),
+  name: z.string().trim().min(2),
+  standId: z.string().min(1),
+});
+
 export const adminOrderFiltersSchema = z.object({
   standId: z.string().min(1).optional(),
   status: orderStatusSchema.optional(),
