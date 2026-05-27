@@ -154,8 +154,6 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
   );
 }
 
-const AUTH_PATHS = new Set(["/login", "/signup"]);
-
 export function AppSidebar() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -164,9 +162,6 @@ export function AppSidebar() {
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
-
-  // Never show sidebar on auth pages
-  if (AUTH_PATHS.has(pathname)) return null;
 
   return (
     <>
