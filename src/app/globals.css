@@ -284,6 +284,19 @@ th {
   background: var(--surface-muted);
 }
 
+.table-row-link:hover td {
+  background: var(--surface-muted);
+  cursor: pointer;
+}
+
+.table-link {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.table-link:hover { text-decoration: underline; }
+
 /* ── Metrics (KPI cards) ──────────────────────────────────────────────────── */
 .metric { display: grid; gap: 6px; }
 
@@ -589,7 +602,7 @@ th {
   max-width: 420px;
 }
 
-.auth-card h1 { margin: 0 0 28px; font-size: 24px; }
+.auth-card h1 { margin: 0; font-size: 24px; }
 
 .auth-form {
   display: flex;
