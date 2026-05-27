@@ -1,7 +1,7 @@
 "use client";
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
+import { CheckCircle2 } from "lucide-react";
 import { useState } from "react";
 
 export function SignupForm() {
@@ -10,7 +10,7 @@ export function SignupForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
+  const [confirmed, setConfirmed] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -18,10 +18,14 @@ export function SignupForm() {
     setLoading(true);
 
     const supabase = createSupabaseBrowserClient();
-    const { error: authError } = await supabase.auth.signUp({
+    const { data, error: authError } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { name } },
+      options: {
+        data: { name },
+        // After clicking the confirmation link, Supabase redirects here.
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
+      },
     });
 
     if (authError) {
@@ -30,9 +34,33 @@ export function SignupForm() {
       return;
     }
 
-    // The DB trigger creates the User row automatically.
-    router.push("/");
-    router.refresh();
+    // session === null means email confirmation is required.
+    // (If confirmation is disabled in Supabase settings, session is non-null
+    //  and we could redirect directly — but we always ask to confirm.)
+    if (!data.session) {
+      setConfirmed(true);
+      setLoading(false);
+      return;
+    }
+
+    // Email confirmation is disabled in Supabase — session is immediately active.
+    window.location.href = "/";
+  }
+
+  if (confirmed) {
+    return (
+      <div className="auth-form stack" style={{ alignItems: "center", textAlign: "center", gap: "16px" }}>
+        <CheckCircle2 size={48} color="var(--accent)" aria-hidden="true" />
+        <h2 style={{ margin: 0 }}>Fast geschafft!</h2>
+        <p className="muted" style={{ margin: 0 }}>
+          Wir haben eine Bestätigungsmail an <strong>{email}</strong> gesendet.
+          Bitte klicke auf den Link in der E-Mail, um dein Konto zu aktivieren.
+        </p>
+        <p className="muted" style={{ fontSize: "13px", margin: 0 }}>
+          Kein Link erhalten? Prüfe auch den Spam-Ordner.
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -75,7 +103,7 @@ export function SignupForm() {
         />
       </div>
       {error && <p className="form-error">{error}</p>}
-      <button type="submit" className="btn btn-primary" disabled={loading}>
+      <button type="submit" className="button primary" disabled={loading}>
         {loading ? "Konto wird erstellt…" : "Konto erstellen"}
       </button>
       <p className="auth-link">
