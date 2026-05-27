@@ -1,9 +1,15 @@
 import { Money } from "@/components/shared/Money";
+import { getCurrentUser } from "@/server/auth/requireUser";
 import { productService } from "@/server/services/ProductService";
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminProductsPage() {
+  const user = await getCurrentUser();
+  const producerId = user?.role === "platform_admin" ? undefined : (user?.producerId ?? undefined);
+
   const result = await productService
-    .listProducerProducts("producer_sonnenhof")
+    .listProducerProducts(producerId)
     .then((items) => ({ items, failed: false }))
     .catch(() => ({ items: [], failed: true }));
 

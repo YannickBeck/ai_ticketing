@@ -1,9 +1,15 @@
 import { StandCard } from "@/components/customer/StandCard";
+import { getCurrentUser } from "@/server/auth/requireUser";
 import { standService } from "@/server/services/StandService";
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminStandsPage() {
+  const user = await getCurrentUser();
+  const producerId = user?.role === "platform_admin" ? undefined : (user?.producerId ?? undefined);
+
   const result = await standService
-    .listAdminStands("producer_sonnenhof")
+    .listAdminStands(producerId)
     .then((items) => ({ items, failed: false }))
     .catch(() => ({ items: [], failed: true }));
 

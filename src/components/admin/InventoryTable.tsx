@@ -1,7 +1,7 @@
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { inventoryMutationService } from "@/server/services/InventoryMutationService";
 
-export async function InventoryTable({ producerId = "producer_sonnenhof" }: { producerId?: string }) {
+export async function InventoryTable({ producerId }: { producerId?: string }) {
   const result = await inventoryMutationService
     .listInventory(producerId)
     .then((items) => ({ items, failed: false }))

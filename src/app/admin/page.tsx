@@ -1,8 +1,14 @@
 import { DashboardKpiGrid } from "@/components/admin/DashboardKpiGrid";
 import { InventoryTable } from "@/components/admin/InventoryTable";
 import { OrdersTable } from "@/components/admin/OrdersTable";
+import { getCurrentUser } from "@/server/auth/requireUser";
 
-export default function AdminDashboardPage() {
+export const dynamic = "force-dynamic";
+
+export default async function AdminDashboardPage() {
+  const user = await getCurrentUser();
+  const producerId = user?.role === "platform_admin" ? undefined : (user?.producerId ?? undefined);
+
   return (
     <>
       <header className="page-header">
@@ -12,8 +18,8 @@ export default function AdminDashboardPage() {
       </header>
       <div className="stack">
         <DashboardKpiGrid />
-        <OrdersTable />
-        <InventoryTable />
+        <OrdersTable producerId={producerId} />
+        <InventoryTable producerId={producerId} />
       </div>
     </>
   );

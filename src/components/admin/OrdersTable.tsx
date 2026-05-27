@@ -4,7 +4,7 @@ import { Money } from "@/components/shared/Money";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { reservationService } from "@/server/services/ReservationService";
 
-export async function OrdersTable({ producerId = "producer_sonnenhof" }: { producerId?: string }) {
+export async function OrdersTable({ producerId }: { producerId?: string }) {
   const result = await reservationService
     .listAdminOrders(producerId)
     .then((orders) => ({ orders, failed: false }))

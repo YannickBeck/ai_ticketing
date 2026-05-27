@@ -3,7 +3,7 @@ import Link from "next/link";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { reservationService } from "@/server/services/ReservationService";
 
-export async function OpenOrdersList({ standId = "stand_mannheim_ost" }: { standId?: string }) {
+export async function OpenOrdersList({ standId }: { standId: string }) {
   const result = await reservationService
     .listStaffOrders(standId)
     .then((orders) => ({ orders, failed: false }))

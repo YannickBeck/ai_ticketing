@@ -1,13 +1,17 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
 import { AlertCircle, Loader2, PackagePlus } from "lucide-react";
+import { type FormEvent, useState } from "react";
+
+type StandOption = {
+  id: string;
+  name: string;
+  products: { id: string; name: string }[];
+};
 
 type ApiEnvelope<T> = {
   data?: T;
-  error?: {
-    message: string;
-  };
+  error?: { message: string };
 };
 
 type InventoryResponse = {
@@ -17,14 +21,23 @@ type InventoryResponse = {
   status: string;
 };
 
-export function StaffDeliveryForm() {
-  const [standId, setStandId] = useState("stand_mannheim_ost");
-  const [productId, setProductId] = useState("prod_spargel_klasse_1");
+export function StaffDeliveryForm({ stands }: { stands: StandOption[] }) {
+  const [standId, setStandId] = useState(stands[0]?.id ?? "");
+  const [productId, setProductId] = useState(stands[0]?.products[0]?.id ?? "");
   const [quantity, setQuantity] = useState("10");
   const [note, setNote] = useState("Lieferung eingetroffen");
   const [result, setResult] = useState<InventoryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const selectedStand = stands.find((s) => s.id === standId);
+  const products = selectedStand?.products ?? [];
+
+  function handleStandChange(newStandId: string) {
+    setStandId(newStandId);
+    const newStand = stands.find((s) => s.id === newStandId);
+    setProductId(newStand?.products[0]?.id ?? "");
+  }
 
   async function submitDelivery(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -35,10 +48,7 @@ export function StaffDeliveryForm() {
     try {
       const response = await fetch("/api/v1/staff/deliveries", {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-demo-role": "staff",
-        },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({
           standId,
           productId,
@@ -60,49 +70,73 @@ export function StaffDeliveryForm() {
     }
   }
 
+  if (stands.length === 0) {
+    return (
+      <div className="card stack">
+        <p className="muted">Kein Stand zugewiesen. Bitte wende dich an den Administrator.</p>
+      </div>
+    );
+  }
+
   return (
     <form className="card stack" onSubmit={submitDelivery}>
       <PackagePlus size={24} aria-hidden="true" />
+
       <label className="form-row">
         Stand
-        <input className="input" onChange={(event) => setStandId(event.target.value)} value={standId} />
-      </label>
-      <label className="form-row">
-        Produkt
-        <select className="input" onChange={(event) => setProductId(event.target.value)} value={productId}>
-          <option value="prod_spargel_klasse_1">Spargel Klasse I</option>
-          <option value="prod_erdbeeren_schale">Erdbeeren</option>
+        <select className="input" value={standId} onChange={(e) => handleStandChange(e.target.value)}>
+          {stands.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
         </select>
       </label>
+
+      <label className="form-row">
+        Produkt
+        <select className="input" value={productId} onChange={(e) => setProductId(e.target.value)}>
+          {products.length === 0 ? (
+            <option value="">Keine Produkte verfügbar</option>
+          ) : (
+            products.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))
+          )}
+        </select>
+      </label>
+
       <label className="form-row">
         Menge
         <input
           className="input"
           min="0.1"
-          onChange={(event) => setQuantity(event.target.value)}
+          onChange={(e) => setQuantity(e.target.value)}
           step="0.1"
           type="number"
           value={quantity}
         />
       </label>
+
       <label className="form-row">
         Notiz
-        <input className="input" onChange={(event) => setNote(event.target.value)} value={note} />
+        <input className="input" onChange={(e) => setNote(e.target.value)} value={note} />
       </label>
-      {error ? (
+
+      {error && (
         <div className="notice error" role="alert">
           <AlertCircle size={18} aria-hidden="true" />
           <span>{error}</span>
         </div>
-      ) : null}
-      {result ? (
+      )}
+
+      {result && (
         <div className="notice info">
-          {result.productName}: Bestand {result.stockQuantity}, verfuegbar {result.availableQuantity}, Status{" "}
-          {result.status}
+          <strong>{result.productName}</strong>: Bestand {result.stockQuantity}, verfügbar{" "}
+          {result.availableQuantity}, Status {result.status}
         </div>
-      ) : null}
-      <button className="button primary" disabled={isSubmitting} type="submit">
-        {isSubmitting ? <Loader2 className="spin" size={18} aria-hidden="true" /> : null}
+      )}
+
+      <button className="button primary" disabled={isSubmitting || !productId} type="submit">
+        {isSubmitting && <Loader2 className="spin" size={18} aria-hidden="true" />}
         Lieferung buchen
       </button>
     </form>
