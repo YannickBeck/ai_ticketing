@@ -1,7 +1,15 @@
+import { UserRole } from "@prisma/client";
 import { ApiError } from "@/server/api/http";
 import { prisma } from "@/server/db/prisma";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { SessionUser } from "@/server/domain/types";
+
+const roleMap: Record<UserRole, SessionUser["role"]> = {
+  [UserRole.CUSTOMER]:       "customer",
+  [UserRole.PRODUCER_ADMIN]: "producer_admin",
+  [UserRole.STAFF]:          "staff",
+  [UserRole.PLATFORM_ADMIN]: "platform_admin",
+};
 
 export async function getCurrentUser(_request?: Request): Promise<SessionUser | null> {
   const supabase = await createSupabaseServerClient();
@@ -25,7 +33,7 @@ export async function getCurrentUser(_request?: Request): Promise<SessionUser | 
 
   return {
     id: user.id,
-    role: user.role as SessionUser["role"],
+    role: roleMap[user.role],
     producerId: user.producerId ?? undefined,
     standIds: user.staffStandAssignments.map((a) => a.standId),
   };

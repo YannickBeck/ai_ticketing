@@ -80,10 +80,8 @@ export class PaymentService {
       };
     }
 
-    if (!order.connectedAccountId) {
-      throw new ApiError("VALIDATION_ERROR", "Stripe Connected Account ID fehlt fuer Produzenten.", 400);
-    }
-
+    // connectedAccountId is optional: with it we use Stripe Connect destination charges
+    // (production); without it we fall back to direct charges (useful for testing/onboarding).
     const stripe = this.createStripeClient();
     const requestOptions = options?.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : undefined;
     const paymentIntent = await stripe.paymentIntents.create(this.buildPaymentIntentParams(order), requestOptions);
@@ -183,27 +181,26 @@ export class PaymentService {
     }
   }
 
-  buildPaymentIntentParams(order: PaymentIntentOrder) {
-    if (!order.connectedAccountId) {
-      throw new ApiError("VALIDATION_ERROR", "Stripe Connected Account ID fehlt fuer Produzenten.", 400);
-    }
-
-    return {
+  buildPaymentIntentParams(order: PaymentIntentOrder): Stripe.PaymentIntentCreateParams {
+    const base: Stripe.PaymentIntentCreateParams = {
       amount: order.totalAmountCents,
       currency: order.currency.toLowerCase(),
-      automatic_payment_methods: {
-        enabled: true,
-      },
-      application_fee_amount: order.serviceFeeCents,
-      transfer_data: {
-        destination: order.connectedAccountId,
-      },
+      automatic_payment_methods: { enabled: true },
       metadata: {
         orderId: order.id,
         orderNumber: order.orderNumber,
       },
       description: `Spargelstand Bestellung ${order.orderNumber}`,
-    } satisfies Stripe.PaymentIntentCreateParams;
+    };
+
+    // If the producer has a Stripe Connected Account, route via Connect (destination charge).
+    // Without one, fall back to a direct charge on the platform account (testing / onboarding).
+    if (order.connectedAccountId) {
+      base.application_fee_amount = order.serviceFeeCents;
+      base.transfer_data = { destination: order.connectedAccountId };
+    }
+
+    return base;
   }
 
   buildPaymentIntentIdempotencyKey(order: PaymentIntentOrder) {
