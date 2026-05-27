@@ -39,17 +39,18 @@
 .dark {
   color-scheme: dark;
 
-  --bg:            #0F0F11;
-  --surface:       #18181B;
-  --surface-muted: #27272A;
-  --text:          #FAFAFA;
-  --muted:         #A1A1AA;
-  --border:        #3F3F46;
+  --bg:            #0D0D11;
+  --surface:       #1C1C24;   /* clearly lighter than bg — cards visible */
+  --surface-muted: #26262F;
+  --text:          #F4F4F5;
+  --muted:         #9898A4;
+  --border:        #4A4A55;   /* more visible borders in dark */
   --accent:        #22C55E;
   --accent-strong: #16A34A;
   --accent-subtle: #052E16;
-  --shadow:    0 1px 3px rgba(0,0,0,0.35), 0 4px 16px rgba(0,0,0,0.30);
-  --shadow-lg: 0 8px 32px rgba(0,0,0,0.45);
+  /* subtle inner ring makes cards "pop" off the dark background */
+  --shadow:    0 0 0 1px rgba(255,255,255,0.04), 0 2px 8px rgba(0,0,0,0.40);
+  --shadow-lg: 0 0 0 1px rgba(255,255,255,0.05), 0 8px 32px rgba(0,0,0,0.55);
 }
 
 /* ── Reset ────────────────────────────────────────────────────────────────── */
@@ -488,6 +489,26 @@ th {
   gap: 10px;
   margin-left: auto;
   flex-shrink: 0;
+}
+
+.customer-theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.customer-theme-toggle:hover {
+  background: var(--surface-muted);
+  color: var(--text);
 }
 
 .customer-hamburger {

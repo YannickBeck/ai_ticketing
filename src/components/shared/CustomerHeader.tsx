@@ -1,10 +1,11 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { LeafyGreen, Menu, ShoppingBasket, X } from "lucide-react";
+import { LeafyGreen, Menu, Moon, ShoppingBasket, Sun, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useTheme } from "next-themes";
 
 const navLinks = [
   { href: "/stands", label: "Stände entdecken" },
@@ -15,19 +16,26 @@ const navLinks = [
 export function CustomerHeader() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { resolvedTheme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
+
+  // Close mobile menu on route change
+  useEffect(() => setMobileOpen(false), [pathname]);
 
   return (
     <header className="customer-header">
       <div className="customer-header-inner">
         {/* Brand */}
-        <Link href="/" className="customer-brand" onClick={() => setMobileOpen(false)}>
+        <Link href="/" className="customer-brand">
           <div className="customer-brand-mark">
             <LeafyGreen size={18} />
           </div>
           <span>Spargelstand</span>
         </Link>
 
-        {/* Desktop nav links */}
+        {/* Desktop nav */}
         <nav className="customer-nav" aria-label="Hauptnavigation">
           {navLinks.map((link) => (
             <Link
@@ -43,12 +51,24 @@ export function CustomerHeader() {
           ))}
         </nav>
 
-        {/* CTA + mobile hamburger */}
+        {/* Right side: theme toggle + CTA + hamburger */}
         <div className="customer-header-cta">
+          {/* Dark/light toggle — always visible on desktop */}
+          {mounted && (
+            <button
+              onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+              className="customer-theme-toggle"
+              aria-label={resolvedTheme === "dark" ? "Hell-Modus aktivieren" : "Dunkel-Modus aktivieren"}
+            >
+              {resolvedTheme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
+          )}
+
           <Link href="/stands" className="button primary customer-cta-btn">
             <ShoppingBasket size={15} aria-hidden="true" />
             Jetzt reservieren
           </Link>
+
           <button
             className="customer-hamburger"
             onClick={() => setMobileOpen((v) => !v)}
