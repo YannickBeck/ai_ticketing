@@ -70,6 +70,9 @@ export function LoginForm() {
         {loading ? "Wird angemeldet…" : "Anmelden"}
       </button>
       <p className="auth-link">
+        <a href="/forgot-password">Passwort vergessen?</a>
+      </p>
+      <p className="auth-link">
         Noch kein Konto? <a href="/signup">Registrieren</a>
       </p>
     </form>
