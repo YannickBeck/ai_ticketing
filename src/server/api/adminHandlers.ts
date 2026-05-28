@@ -83,7 +83,7 @@ export async function handlePatchInventory(request: Request, standId: string, pr
   requireRole(user, ["producer_admin", "platform_admin"]);
   const input = inventoryUpdateSchema.parse(await parseJson(request));
 
-  return jsonOk(await inventoryMutationService.updateInventory({
+  return jsonOk(await inventoryMutationService.upsertInventory({
     user,
     standId,
     productId,

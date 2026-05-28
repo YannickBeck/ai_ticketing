@@ -204,6 +204,52 @@ export class InventoryMutationService {
     });
   }
 
+  /** Create a brand-new inventory record for a (stand, product) pair that has no row yet. */
+  async createInventory(input: InventoryMutationInput) {
+    const stand = await this.db.stand.findUnique({ where: { id: input.standId } });
+    if (!stand) throw new ApiError("NOT_FOUND", "Stand nicht gefunden.", 404);
+
+    this.assertCanMutateInventory(input.user, stand.producerId);
+
+    const stockQty = input.stockQuantity ?? 0;
+    const safetyBuffer = input.safetyBuffer ?? 0;
+    const lowStockThreshold = input.lowStockThreshold ?? 0;
+    const domainStatus = inventoryService.calculateStatus({
+      stockQuantity: stockQty,
+      reservedQuantity: 0,
+      safetyBuffer,
+      lowStockThreshold,
+    });
+
+    const created = await this.db.inventory.create({
+      data: {
+        standId: input.standId,
+        productId: input.productId,
+        stockQuantity: stockQty,
+        reservedQuantity: 0,
+        safetyBuffer,
+        lowStockThreshold,
+        status: statusMap[domainStatus],
+        updatedByUserId: input.user.id,
+        nextDeliveryAt: input.nextDeliveryAt ? new Date(input.nextDeliveryAt) : null,
+      },
+      include: { product: true, stand: true },
+    });
+
+    return this.toDto(created);
+  }
+
+  /** Update if the inventory row already exists, create it otherwise. */
+  async upsertInventory(input: InventoryMutationInput) {
+    const existing = await this.db.inventory.findUnique({
+      where: { standId_productId: { standId: input.standId, productId: input.productId } },
+    });
+    if (existing) {
+      return this.updateInventory(input);
+    }
+    return this.createInventory(input);
+  }
+
   async recordDelivery(input: {
     user: SessionUser;
     standId: string;
