@@ -1,16 +1,20 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { Money } from "@/components/shared/Money";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { getCurrentUser } from "@/server/auth/requireUser";
 import { reservationService } from "@/server/services/ReservationService";
 
 type PageProps = { params: Promise<{ orderId: string }> };
 
 export default async function OrderPage({ params }: PageProps) {
   const { orderId } = await params;
+  const user = await getCurrentUser();
+  if (!user) redirect(`/login?redirect=/orders/${orderId}`);
+
   const order = await reservationService.getOrder(orderId).catch(() => null);
-  if (!order) notFound();
+  if (!order || order.customerId !== user.id) notFound();
 
   return (
     <>
