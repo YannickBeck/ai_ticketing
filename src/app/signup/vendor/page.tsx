@@ -1,10 +1,10 @@
 import { LeafyGreen } from "lucide-react";
 import Link from "next/link";
-import { SignupForm } from "./SignupForm";
+import { VendorSignupForm } from "./VendorSignupForm";
 
-export const metadata = { title: "Registrieren – Spargelstand" };
+export const metadata = { title: "Als Händler registrieren – Spargelstand" };
 
-export default function SignupPage() {
+export default function VendorSignupPage() {
   return (
     <div className="auth-page">
       <div className="auth-card">
@@ -25,19 +25,18 @@ export default function SignupPage() {
               <LeafyGreen size={26} style={{ color: "#fff" }} />
             </div>
           </Link>
-          <h1 style={{ margin: 0, fontSize: 22 }}>Konto erstellen</h1>
+          <h1 style={{ margin: 0, fontSize: 22 }}>Als Händler registrieren</h1>
           <p className="muted" style={{ margin: 0, fontSize: 14, textAlign: "center" }}>
-            Jetzt registrieren und Spargel reservieren
+            Eröffne deinen Spargelstand und nimm Reservierungen an
           </p>
-          <Link
-            href="/signup/vendor"
-            style={{ fontSize: 13, color: "var(--accent)", textDecoration: "none" }}
-          >
-            Du bist Händler? → Hier registrieren
-          </Link>
         </div>
 
-        <SignupForm />
+        <VendorSignupForm />
+
+        <p className="auth-link" style={{ marginTop: 20, textAlign: "center" }}>
+          Nur Spargel kaufen?{" "}
+          <Link href="/signup">Als Kunde registrieren</Link>
+        </p>
       </div>
     </div>
   );
