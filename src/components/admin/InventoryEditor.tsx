@@ -32,7 +32,7 @@ export function InventoryEditor({ items }: { items: InventoryItem[] }) {
       items.map((item) => [
         item.id,
         {
-          stockQuantity: String(item.stockQuantity),
+          stockQuantity: String(Math.round(item.stockQuantity * 10) / 10),
           saving: false,
           saved: false,
           error: null,
@@ -104,7 +104,7 @@ export function InventoryEditor({ items }: { items: InventoryItem[] }) {
           {items.map((item) => {
             const row = rows[item.id];
             const currentQty = parseFloat(row.stockQuantity.replace(",", "."));
-            const isDirty = !isNaN(currentQty) && currentQty !== item.stockQuantity;
+            const isDirty = !isNaN(currentQty) && Math.abs(currentQty - item.stockQuantity) > 0.001;
 
             return (
               <tr key={item.id}>
