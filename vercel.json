@@ -3,8 +3,8 @@
   "buildCommand": "npx prisma generate && next build",
   "installCommand": "npm install",
   "crons": [
-    { "path": "/api/v1/cron/expire-reservations", "schedule": "0 0 * * *" },
-    { "path": "/api/v1/cron/expire-qr-tokens",    "schedule": "0 2 * * *" },
-    { "path": "/api/v1/cron/pickup-reminders",    "schedule": "0 6 * * *" }
+    { "path": "/api/v1/cron/expire-reservations", "schedule": "*/5 * * * *" },
+    { "path": "/api/v1/cron/expire-qr-tokens",    "schedule": "*/30 * * * *" },
+    { "path": "/api/v1/cron/pickup-reminders",    "schedule": "*/10 * * * *" }
   ]
 }
