@@ -17,6 +17,7 @@ import { ApiError } from "@/server/api/http";
 import { prisma } from "@/server/db/prisma";
 import type { SessionUser } from "@/server/domain/types";
 import { createEmailProvider } from "@/server/providers/EmailProvider";
+import { createWhatsAppProvider } from "@/server/providers/WhatsAppProvider";
 import type { StripePaymentEventResult } from "@/server/services/PaymentService";
 import { QRCodeService } from "@/server/services/QRCodeService";
 
@@ -548,27 +549,48 @@ export class PaymentRepository {
       where: {
         orderId,
         status: NotificationStatus.PENDING,
-        channel: NotificationChannel.EMAIL,
       },
       include: { order: { include: { customer: true } } },
     });
 
     const emailProvider = createEmailProvider();
+    const whatsappProvider = createWhatsAppProvider();
 
     for (const notification of pending) {
       try {
+        const orderNumber = notification.order?.orderNumber ?? "";
+        const pickupSlotStart = notification.order?.pickupSlotStart;
+        const pickupTime = pickupSlotStart
+          ? new Date(pickupSlotStart).toLocaleTimeString("de-DE", {
+              hour: "2-digit",
+              minute: "2-digit",
+              timeZone: "Europe/Berlin",
+            }) + " Uhr"
+          : "";
+
         const vars: Record<string, string> = {
           customerName: notification.order?.customer?.name ?? "",
-          orderNumber: notification.order?.id ?? "",
+          orderNumber,
+          pickupTime,
           orderId: notification.orderId ?? "",
         };
 
-        const result = await emailProvider.send({
-          to: notification.recipient,
-          subject: "Spargelstand Bestellung",
-          templateKey: notification.templateKey,
-          variables: vars,
-        });
+        let result: { providerMessageId: string; provider: string };
+
+        if (notification.channel === NotificationChannel.WHATSAPP) {
+          result = await whatsappProvider.sendTemplate({
+            to: notification.recipient,
+            templateKey: notification.templateKey,
+            variables: vars,
+          });
+        } else {
+          result = await emailProvider.send({
+            to: notification.recipient,
+            subject: "Spargelstand Bestellung",
+            templateKey: notification.templateKey,
+            variables: vars,
+          });
+        }
 
         await tx.notification.update({
           where: { id: notification.id },
@@ -592,7 +614,7 @@ export class PaymentRepository {
   }
 
   private async createOrderConfirmedNotifications(tx: Db, orderId: string, userId: string) {
-    const existing = await tx.notification.findFirst({
+    const existingEmail = await tx.notification.findFirst({
       where: {
         orderId,
         channel: NotificationChannel.EMAIL,
@@ -600,27 +622,51 @@ export class PaymentRepository {
       },
     });
 
-    if (existing) {
-      return;
-    }
-
     const user = await tx.user.findUniqueOrThrow({
       where: { id: userId },
-      select: { email: true },
+      select: { email: true, phoneNumber: true, whatsappOptIn: true },
     });
 
-    await tx.notification.create({
-      data: {
-        userId,
-        orderId,
-        channel: NotificationChannel.EMAIL,
-        type: NotificationType.ORDER_CONFIRMED,
-        templateKey: "email.order_confirmed.v1",
-        recipient: user.email,
-        status: NotificationStatus.PENDING,
-        provider: "email",
-      },
-    });
+    if (!existingEmail) {
+      await tx.notification.create({
+        data: {
+          userId,
+          orderId,
+          channel: NotificationChannel.EMAIL,
+          type: NotificationType.ORDER_CONFIRMED,
+          templateKey: "email.order_confirmed.v1",
+          recipient: user.email,
+          status: NotificationStatus.PENDING,
+          provider: "email",
+        },
+      });
+    }
+
+    // WhatsApp notification — only if user has opted in and provided a phone number
+    if (user.whatsappOptIn && user.phoneNumber) {
+      const existingWa = await tx.notification.findFirst({
+        where: {
+          orderId,
+          channel: NotificationChannel.WHATSAPP,
+          type: NotificationType.ORDER_CONFIRMED,
+        },
+      });
+
+      if (!existingWa) {
+        await tx.notification.create({
+          data: {
+            userId,
+            orderId,
+            channel: NotificationChannel.WHATSAPP,
+            type: NotificationType.ORDER_CONFIRMED,
+            templateKey: "whatsapp.order_confirmed.v1",
+            recipient: user.phoneNumber,
+            status: NotificationStatus.PENDING,
+            provider: "twilio",
+          },
+        });
+      }
+    }
   }
 }
 

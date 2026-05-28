@@ -2,6 +2,7 @@ import { ApiError, jsonCreated, jsonOk, parseJson } from "@/server/api/http";
 import { canReadOwnOrder } from "@/server/auth/permissions";
 import { requireUser } from "@/server/auth/requireUser";
 import { prisma } from "@/server/db/prisma";
+import { NotificationChannel } from "@prisma/client";
 import {
   createOrderSchema,
   notificationPreferenceSchema,
@@ -11,6 +12,12 @@ import {
 import { paymentService } from "@/server/services/PaymentService";
 import { reservationService } from "@/server/services/ReservationService";
 import { standService } from "@/server/services/StandService";
+
+const channelMap: Record<string, NotificationChannel> = {
+  email: NotificationChannel.EMAIL,
+  whatsapp: NotificationChannel.WHATSAPP,
+  push: NotificationChannel.PUSH,
+};
 
 export async function handleListStands(request: Request) {
   const stands = await standService.searchStands(new URL(request.url));
@@ -79,6 +86,28 @@ export async function handleGetOrderNotifications(request: Request, orderId: str
   return jsonOk(notifications);
 }
 
+export async function handleGetNotificationPreferences(request: Request) {
+  const user = await requireUser(request);
+
+  const [dbUser, preferences] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: user.id },
+      select: { phoneNumber: true, whatsappOptIn: true, whatsappOptInAt: true },
+    }),
+    prisma.notificationPreference.findMany({
+      where: { userId: user.id },
+      select: { channel: true, enabled: true, updatedAt: true },
+    }),
+  ]);
+
+  return jsonOk({
+    phoneNumber: dbUser?.phoneNumber ?? null,
+    whatsappOptIn: dbUser?.whatsappOptIn ?? false,
+    whatsappOptInAt: dbUser?.whatsappOptInAt?.toISOString() ?? null,
+    preferences,
+  });
+}
+
 export async function handleUpdateNotificationPreferences(request: Request) {
   const user = await requireUser(request);
   const input = notificationPreferenceSchema.parse(await parseJson(request));
@@ -87,11 +116,33 @@ export async function handleUpdateNotificationPreferences(request: Request) {
     throw new ApiError("PHONE_VERIFICATION_REQUIRED", "Telefonnummer ist fuer WhatsApp erforderlich.", 422);
   }
 
+  const prismaChannel = channelMap[input.channel];
+
+  // Persist phone number and WhatsApp opt-in on the User record
+  const userUpdate: Parameters<typeof prisma.user.update>[0]["data"] = {};
+  if (input.channel === "whatsapp") {
+    if (input.phoneNumber) userUpdate.phoneNumber = input.phoneNumber;
+    userUpdate.whatsappOptIn = input.enabled;
+    userUpdate.whatsappOptInAt = input.enabled ? new Date() : undefined;
+    userUpdate.whatsappOptOutAt = !input.enabled ? new Date() : undefined;
+  }
+
+  await prisma.$transaction([
+    ...(Object.keys(userUpdate).length > 0
+      ? [prisma.user.update({ where: { id: user.id }, data: userUpdate })]
+      : []),
+    prisma.notificationPreference.upsert({
+      where: { userId_channel: { userId: user.id, channel: prismaChannel } },
+      create: { userId: user.id, channel: prismaChannel, enabled: input.enabled },
+      update: { enabled: input.enabled },
+    }),
+  ]);
+
   return jsonOk({
     userId: user.id,
-    ...input,
-    whatsappOptInAt: input.channel === "whatsapp" && input.enabled ? new Date().toISOString() : null,
-    implementationNote: "Naechster Schritt: Preference und User-Telefonnummer persistieren.",
+    channel: input.channel,
+    enabled: input.enabled,
+    phoneNumber: input.phoneNumber ?? null,
   });
 }
 

@@ -44,6 +44,7 @@ export default async function AdminStandDetailPage({ params }: PageProps) {
         standId={stand.id}
         initialName={stand.name}
         initialPublicNote={stand.publicNote ?? ""}
+        initialStatus={(stand.status ?? "closed") as "open" | "closed" | "seasonal_pause"}
       />
     </>
   );
