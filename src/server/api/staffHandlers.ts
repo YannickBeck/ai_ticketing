@@ -26,7 +26,7 @@ export async function handleStaffOrders(request: Request) {
 
 export async function handleStaffScan(request: Request) {
   const user = await requireUser(request);
-  requireRole(user, ["staff", "platform_admin"]);
+  requireRole(user, ["staff", "platform_admin", "producer_admin"]);
   const input = staffScanSchema.parse(await parseJson(request));
   requireStandScope(user, input.standId);
 
