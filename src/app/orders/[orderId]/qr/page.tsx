@@ -1,4 +1,5 @@
 import QRCode from "qrcode";
+import { notFound } from "next/navigation";
 
 import { QRCodeDisplay } from "@/components/customer/QRCodeDisplay";
 import { reservationService } from "@/server/services/ReservationService";
@@ -7,7 +8,8 @@ type PageProps = { params: Promise<{ orderId: string }> };
 
 export default async function OrderQrPage({ params }: PageProps) {
   const { orderId } = await params;
-  const qr = await reservationService.getOrderQr(orderId);
+  const qr = await reservationService.getOrderQr(orderId).catch(() => null);
+  if (!qr) notFound();
   const qrDataUrl = await QRCode.toDataURL(qr.qrLink, {
     margin: 1,
     width: 240,

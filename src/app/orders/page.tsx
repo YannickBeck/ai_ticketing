@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { Money } from "@/components/shared/Money";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -11,19 +12,7 @@ export default async function OrdersPage() {
   const user = await getCurrentUser();
 
   if (!user) {
-    return (
-      <>
-        <header className="page-header">
-          <span className="eyebrow">Konto</span>
-          <h1>Meine Bestellungen</h1>
-        </header>
-        <div className="card stack">
-          <p className="muted">
-            Bitte <Link href="/login" className="table-link">anmelden</Link>, um Bestellungen zu sehen.
-          </p>
-        </div>
-      </>
-    );
+    redirect("/login?redirect=/orders");
   }
 
   const orders = await prisma.order

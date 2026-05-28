@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 
 import { Money } from "@/components/shared/Money";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -8,7 +9,8 @@ type PageProps = { params: Promise<{ orderId: string }> };
 
 export default async function OrderPage({ params }: PageProps) {
   const { orderId } = await params;
-  const order = await reservationService.getOrder(orderId);
+  const order = await reservationService.getOrder(orderId).catch(() => null);
+  if (!order) notFound();
 
   return (
     <>
