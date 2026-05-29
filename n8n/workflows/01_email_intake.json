@@ -1,0 +1,186 @@
+{
+  "name": "01 Email Intake",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 2 }]
+        }
+      },
+      "name": "Every 2 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "id": "schedule-trigger"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 50,
+        "filters": {
+          "isRead": false,
+          "folderId": "inbox"
+        },
+        "additionalFields": {
+          "fields": "id,subject,bodyPreview,body,from,toRecipients,receivedDateTime,hasAttachments,internetMessageId,conversationId"
+        }
+      },
+      "name": "Graph API: Get Unread Emails",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "position": [450, 300],
+      "id": "graph-get-emails",
+      "credentials": { "microsoftOutlookOAuth2Api": { "id": "graph-oauth2", "name": "Microsoft Graph OAuth2" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Deduplizierung: Prüfe ob Message-ID bereits verarbeitet\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const messageId = item.json.internetMessageId;\n  const conversationId = item.json.conversationId;\n  \n  // Normalisiere E-Mail Felder\n  results.push({\n    json: {\n      messageId,\n      conversationId,\n      subject: item.json.subject || '(kein Betreff)',\n      body: item.json.body?.content || item.json.bodyPreview || '',\n      fromEmail: item.json.from?.emailAddress?.address || '',\n      fromName: item.json.from?.emailAddress?.name || '',\n      receivedAt: item.json.receivedDateTime,\n      hasAttachments: item.json.hasAttachments || false,\n      graphMessageId: item.json.id,\n      // Idempotency Key für Workflow Run\n      idempotencyKey: `email_intake_${messageId}`\n    }\n  });\n}\n\nreturn results;"
+      },
+      "name": "Normalize Email",
+      "type": "n8n-nodes-base.code",
+      "position": [650, 300],
+      "id": "normalize-email"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO workflow_run (workflow_name, idempotency_key, status, zammad_ticket_id)\nVALUES ('email_intake', $1, 'running', NULL)\nON CONFLICT (idempotency_key) DO NOTHING\nRETURNING id, idempotency_key",
+        "queryParams": "={{ $json.idempotencyKey }}"
+      },
+      "name": "Deduplicate via DB",
+      "type": "n8n-nodes-base.postgres",
+      "position": [850, 300],
+      "id": "dedup-db",
+      "credentials": { "postgres": { "id": "pg-ai-buddy", "name": "PostgreSQL AI Buddy" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [{ "value1": "={{ $json.id }}", "operation": "isNotEmpty" }]
+        }
+      },
+      "name": "Is New? (Not Duplicate)",
+      "type": "n8n-nodes-base.if",
+      "position": [1050, 300],
+      "id": "is-new"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ZAMMAD_BASE_URL }}/api/v1/tickets",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "title", "value": "={{ $('Normalize Email').item.json.subject }}" },
+            { "name": "group", "value": "Support" },
+            { "name": "customer", "value": "={{ $('Normalize Email').item.json.fromEmail }}" },
+            { "name": "state", "value": "new" },
+            { "name": "priority", "value": "2 normal" }
+          ]
+        }
+      },
+      "name": "Zammad: Create Ticket",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1250, 200],
+      "id": "zammad-create-ticket",
+      "credentials": { "httpHeaderAuth": { "id": "zammad-api", "name": "Zammad API Token" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ZAMMAD_BASE_URL }}/api/v1/ticket_articles",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "ticket_id", "value": "={{ $('Zammad: Create Ticket').item.json.id }}" },
+            { "name": "body", "value": "={{ $('Normalize Email').item.json.body }}" },
+            { "name": "from", "value": "={{ $('Normalize Email').item.json.fromName }} <{{ $('Normalize Email').item.json.fromEmail }}>" },
+            { "name": "type", "value": "email" },
+            { "name": "sender", "value": "Customer" },
+            { "name": "internal", "value": false }
+          ]
+        }
+      },
+      "name": "Zammad: Add Email as Article",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1450, 200],
+      "id": "zammad-add-article",
+      "credentials": { "httpHeaderAuth": { "id": "zammad-api", "name": "Zammad API Token" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE workflow_run SET status='success', zammad_ticket_id=$1, finished_at=NOW() WHERE idempotency_key=$2",
+        "queryParams": "={{ $('Zammad: Create Ticket').item.json.id }},={{ $('Normalize Email').item.json.idempotencyKey }}"
+      },
+      "name": "Update WorkflowRun: Success",
+      "type": "n8n-nodes-base.postgres",
+      "position": [1650, 200],
+      "id": "update-run-success",
+      "credentials": { "postgres": { "id": "pg-ai-buddy", "name": "PostgreSQL AI Buddy" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_BASE_URL }}/webhook/ticket-classification",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "zammad_ticket_id", "value": "={{ $('Zammad: Create Ticket').item.json.id }}" },
+            { "name": "subject", "value": "={{ $('Normalize Email').item.json.subject }}" },
+            { "name": "body", "value": "={{ $('Normalize Email').item.json.body }}" },
+            { "name": "from_email", "value": "={{ $('Normalize Email').item.json.fromEmail }}" }
+          ]
+        }
+      },
+      "name": "Trigger: Classification Workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1850, 200],
+      "id": "trigger-classification"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.microsoft.com/v1.0/me/messages/={{ $('Normalize Email').item.json.graphMessageId }}/markAsRead",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api"
+      },
+      "name": "Graph API: Mark as Read",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [2050, 200],
+      "id": "graph-mark-read",
+      "credentials": { "oAuth2Api": { "id": "graph-oauth2", "name": "Microsoft Graph OAuth2" } }
+    }
+  ],
+  "connections": {
+    "Every 2 Minutes": { "main": [[{ "node": "Graph API: Get Unread Emails", "type": "main", "index": 0 }]] },
+    "Graph API: Get Unread Emails": { "main": [[{ "node": "Normalize Email", "type": "main", "index": 0 }]] },
+    "Normalize Email": { "main": [[{ "node": "Deduplicate via DB", "type": "main", "index": 0 }]] },
+    "Deduplicate via DB": { "main": [[{ "node": "Is New? (Not Duplicate)", "type": "main", "index": 0 }]] },
+    "Is New? (Not Duplicate)": {
+      "main": [
+        [{ "node": "Zammad: Create Ticket", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Zammad: Create Ticket": { "main": [[{ "node": "Zammad: Add Email as Article", "type": "main", "index": 0 }]] },
+    "Zammad: Add Email as Article": { "main": [[{ "node": "Update WorkflowRun: Success", "type": "main", "index": 0 }]] },
+    "Update WorkflowRun: Success": { "main": [[{ "node": "Trigger: Classification Workflow", "type": "main", "index": 0 }]] },
+    "Trigger: Classification Workflow": { "main": [[{ "node": "Graph API: Mark as Read", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "tags": ["intake", "email", "mvp"]
+}
