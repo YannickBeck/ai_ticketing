@@ -1,13 +1,34 @@
-node_modules
-.next
-out
-dist
-coverage
+# Secrets
 .env
-.env.local
-.env.*.local
-.env.vercel.tmp
+*.env.local
+*.env.prod
+
+# Azure Credentials
+.azure/
+azure-credentials.json
+
+# Node
+node_modules/
+.npm/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json
+.idea/
+
+# n8n Exports (Auto-generiert durch GitHub Actions)
+# n8n/workflows/exports/  → Diese werden committet (Versionierung)
+
+# Bicep compiled ARM templates
+*.json.bak
+
+# Logs
 *.log
-*.tsbuildinfo
-prisma/dev.db
-.vercel
