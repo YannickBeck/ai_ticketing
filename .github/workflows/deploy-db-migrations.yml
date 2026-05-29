@@ -1,0 +1,56 @@
+name: Run DB Migrations
+
+on:
+  push:
+    paths:
+      - 'db/migrations/**'
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    name: Apply PostgreSQL Migrations
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get install -y postgresql-client
+
+      - name: Run migrations on ai_buddy DB
+        env:
+          PGPASSWORD: ${{ secrets.PG_AI_BUDDY_PASSWORD }}
+        run: |
+          for f in $(ls db/migrations/*.sql | sort); do
+            echo ">>> Applying: $f"
+            psql \
+              -h ${{ secrets.PG_HOST }} \
+              -U pgadmin \
+              -d ai_buddy \
+              -f "$f" \
+              --set ON_ERROR_STOP=1
+            echo "✓ Done: $f"
+          done
+
+      - name: Verify schema
+        env:
+          PGPASSWORD: ${{ secrets.PG_AI_BUDDY_PASSWORD }}
+        run: |
+          echo "=== Tables in ai_buddy ==="
+          psql \
+            -h ${{ secrets.PG_HOST }} \
+            -U pgadmin \
+            -d ai_buddy \
+            -c "\dt"
+
+      - name: Check pgvector extension
+        env:
+          PGPASSWORD: ${{ secrets.PG_AI_BUDDY_PASSWORD }}
+        run: |
+          psql \
+            -h ${{ secrets.PG_HOST }} \
+            -U pgadmin \
+            -d ai_buddy \
+            -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'vector';"
