@@ -1,0 +1,276 @@
+// ============================================================
+// Azure Container Apps Environment
+// Services: n8n | Zammad | Redis | Elasticsearch
+// ============================================================
+
+param location string
+param env string
+param logAnalyticsWorkspaceId string
+@secure()
+param logAnalyticsWorkspaceKey string
+param pgHost string
+param keyVaultName string
+
+// ─── Container Apps Environment ───────────────────────────────
+
+resource caEnv 'Microsoft.App/managedEnvironments@2023-05-01' = {
+  name: 'cae-ai-ticketing-${env}'
+  location: location
+  properties: {
+    appLogsConfiguration: {
+      destination: 'log-analytics'
+      logAnalyticsConfiguration: {
+        customerId: logAnalyticsWorkspaceId
+        sharedKey: logAnalyticsWorkspaceKey
+      }
+    }
+    workloadProfiles: [
+      {
+        name: 'Consumption'
+        workloadProfileType: 'Consumption'
+      }
+    ]
+  }
+}
+
+// ─── Managed Identity für alle Container Apps ─────────────────
+// Erlaubt Key Vault Zugriff ohne Credentials im Container
+
+resource caIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'id-ai-ticketing-${env}'
+  location: location
+}
+
+// Key Vault Secrets User Rolle für die Managed Identity
+resource kvRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(caIdentity.id, 'Key Vault Secrets User')
+  scope: resourceGroup()
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')  // Key Vault Secrets User
+    principalId: caIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// ─── Redis (Zammad benötigt Redis für Sessions/Jobs) ──────────
+
+resource redisApp 'Microsoft.App/containerApps@2023-05-01' = {
+  name: 'ca-redis-${env}'
+  location: location
+  properties: {
+    managedEnvironmentId: caEnv.id
+    configuration: {
+      ingress: {
+        external: false
+        targetPort: 6379
+        transport: 'tcp'
+      }
+    }
+    template: {
+      containers: [
+        {
+          name: 'redis'
+          image: 'redis:7-alpine'
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+          args: ['redis-server', '--appendonly', 'yes']
+        }
+      ]
+      scale: {
+        minReplicas: 1
+        maxReplicas: 1
+      }
+    }
+  }
+}
+
+// ─── Elasticsearch (Zammad Volltext-Suche) ───────────────────
+
+resource elasticsearchApp 'Microsoft.App/containerApps@2023-05-01' = {
+  name: 'ca-elasticsearch-${env}'
+  location: location
+  properties: {
+    managedEnvironmentId: caEnv.id
+    configuration: {
+      ingress: {
+        external: false
+        targetPort: 9200
+        transport: 'http'
+      }
+    }
+    template: {
+      containers: [
+        {
+          name: 'elasticsearch'
+          image: 'docker.elastic.co/elasticsearch/elasticsearch:8.11.0'
+          env: [
+            { name: 'discovery.type', value: 'single-node' }
+            { name: 'xpack.security.enabled', value: 'false' }
+            { name: 'ES_JAVA_OPTS', value: '-Xms512m -Xmx512m' }
+          ]
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+        }
+      ]
+      scale: {
+        minReplicas: 1
+        maxReplicas: 1
+      }
+    }
+  }
+}
+
+// ─── Zammad (Rails App + WebSocket + Scheduler) ───────────────
+// Zammad benötigt mehrere Prozesse — hier als Hauptapp
+
+resource zammadApp 'Microsoft.App/containerApps@2023-05-01' = {
+  name: 'ca-zammad-${env}'
+  location: location
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${caIdentity.id}': {}
+    }
+  }
+  dependsOn: [redisApp, elasticsearchApp]
+  properties: {
+    managedEnvironmentId: caEnv.id
+    configuration: {
+      ingress: {
+        external: true
+        targetPort: 3000
+        transport: 'http'
+        corsPolicy: {
+          allowedOrigins: ['*']
+        }
+      }
+      secrets: [
+        {
+          name: 'pg-zammad-password'
+          keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/pg-zammad-password'
+          identity: caIdentity.id
+        }
+        {
+          name: 'zammad-secret-token'
+          keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/zammad-secret-token'
+          identity: caIdentity.id
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'zammad-railsserver'
+          image: 'ghcr.io/zammad/zammad:6.3.0'
+          env: [
+            { name: 'POSTGRESQL_HOST', value: pgHost }
+            { name: 'POSTGRESQL_PORT', value: '5432' }
+            { name: 'POSTGRESQL_DB', value: 'zammad' }
+            { name: 'POSTGRESQL_USER', value: 'pgadmin' }
+            { name: 'POSTGRESQL_PASS', secretRef: 'pg-zammad-password' }
+            { name: 'POSTGRESQL_OPTIONS', value: 'sslmode=require' }
+            { name: 'REDIS_URL', value: 'redis://ca-redis-${env}:6379' }
+            { name: 'ELASTICSEARCH_HOST', value: 'ca-elasticsearch-${env}' }
+            { name: 'ELASTICSEARCH_PORT', value: '9200' }
+            { name: 'ELASTICSEARCH_SSL', value: 'false' }
+            { name: 'ZAMMAD_SECRET_TOKEN', secretRef: 'zammad-secret-token' }
+            { name: 'ZAMMAD_RAILSSERVER_PORT', value: '3000' }
+            { name: 'RAILS_ENV', value: 'production' }
+          ]
+          resources: {
+            cpu: json('1.0')
+            memory: '2Gi'
+          }
+        }
+      ]
+      scale: {
+        minReplicas: 1
+        maxReplicas: 2
+      }
+    }
+  }
+}
+
+// ─── n8n (Workflow Engine) ────────────────────────────────────
+
+resource n8nApp 'Microsoft.App/containerApps@2023-05-01' = {
+  name: 'ca-n8n-${env}'
+  location: location
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${caIdentity.id}': {}
+    }
+  }
+  properties: {
+    managedEnvironmentId: caEnv.id
+    configuration: {
+      ingress: {
+        external: true
+        targetPort: 5678
+        transport: 'http'
+      }
+      secrets: [
+        {
+          name: 'n8n-encryption-key'
+          keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/n8n-encryption-key'
+          identity: caIdentity.id
+        }
+        {
+          name: 'pg-n8n-password'
+          keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/pg-n8n-password'
+          identity: caIdentity.id
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'n8n'
+          image: 'n8nio/n8n:1.44.0'
+          env: [
+            { name: 'N8N_HOST', value: 'ca-n8n-${env}.${caEnv.properties.defaultDomain}' }
+            { name: 'N8N_PORT', value: '5678' }
+            { name: 'N8N_PROTOCOL', value: 'https' }
+            { name: 'N8N_ENCRYPTION_KEY', secretRef: 'n8n-encryption-key' }
+            // PostgreSQL Backend
+            { name: 'DB_TYPE', value: 'postgresdb' }
+            { name: 'DB_POSTGRESDB_HOST', value: pgHost }
+            { name: 'DB_POSTGRESDB_PORT', value: '5432' }
+            { name: 'DB_POSTGRESDB_DATABASE', value: 'n8n' }
+            { name: 'DB_POSTGRESDB_USER', value: 'pgadmin' }
+            { name: 'DB_POSTGRESDB_PASSWORD', secretRef: 'pg-n8n-password' }
+            { name: 'DB_POSTGRESDB_SSL_ENABLED', value: 'true' }
+            // Execution Logs speichern
+            { name: 'EXECUTIONS_DATA_SAVE_ON_SUCCESS', value: 'all' }
+            { name: 'EXECUTIONS_DATA_SAVE_ON_ERROR', value: 'all' }
+            { name: 'EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS', value: 'true' }
+            { name: 'EXECUTIONS_DATA_MAX_AGE', value: '336' }  // 14 Tage in Stunden
+            // Timezone
+            { name: 'GENERIC_TIMEZONE', value: 'Europe/Berlin' }
+            // n8n API aktivieren (für GitHub Actions Export)
+            { name: 'N8N_PUBLIC_API_DISABLED', value: 'false' }
+          ]
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+        }
+      ]
+      scale: {
+        minReplicas: 1
+        maxReplicas: 3
+      }
+    }
+  }
+}
+
+// Outputs
+output n8nUrl string = 'https://${n8nApp.properties.configuration.ingress.fqdn}'
+output zammadUrl string = 'https://${zammadApp.properties.configuration.ingress.fqdn}'
+output caEnvId string = caEnv.id
+output managedIdentityId string = caIdentity.id
