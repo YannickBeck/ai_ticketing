@@ -1,0 +1,123 @@
+{
+  "name": "04 Human Approval",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "approval", "responseMode": "lastNode" },
+      "name": "Webhook: Approval Action",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "id": "webhook-approval"
+    },
+    {
+      "parameters": {
+        "jsCode": "// HMAC Signatur prüfen (Webhook Security)\nconst crypto = require('crypto');\nconst payload = JSON.stringify($input.first().json);\nconst signature = $input.first().headers['x-webhook-signature'];\nconst secret = $env.WEBHOOK_SIGNING_SECRET;\n\nconst expected = crypto.createHmac('sha256', secret).update(payload).digest('hex');\n\nif (signature !== `sha256=${expected}`) {\n  throw new Error('Invalid webhook signature — request rejected');\n}\n\nconst body = $input.first().json;\nconst validActions = ['approve', 'edit', 'reject', 'escalate'];\n\nif (!validActions.includes(body.action)) {\n  throw new Error(`Invalid action: ${body.action}`);\n}\n\nreturn [{ json: body }];"
+      },
+      "name": "Validate Signature & Action",
+      "type": "n8n-nodes-base.code",
+      "position": [450, 300],
+      "id": "validate-signature"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "conditions": { "string": [{ "value1": "={{ $json.action }}", "value2": "approve", "operation": "equals" }] } },
+            { "conditions": { "string": [{ "value1": "={{ $json.action }}", "value2": "edit", "operation": "equals" }] } },
+            { "conditions": { "string": [{ "value1": "={{ $json.action }}", "value2": "reject", "operation": "equals" }] } },
+            { "conditions": { "string": [{ "value1": "={{ $json.action }}", "value2": "escalate", "operation": "equals" }] } }
+          ]
+        }
+      },
+      "name": "Route by Action",
+      "type": "n8n-nodes-base.switch",
+      "position": [650, 300],
+      "id": "route-action"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ZAMMAD_BASE_URL }}/api/v1/ticket_articles",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ticket_id\": {{ $('Validate Signature & Action').item.json.zammad_ticket_id }},\n  \"type\": \"email\",\n  \"sender\": \"Agent\",\n  \"to\": \"{{ $('Validate Signature & Action').item.json.customer_email }}\",\n  \"subject\": \"Re: {{ $('Validate Signature & Action').item.json.ticket_subject }}\",\n  \"body\": \"{{ $('Validate Signature & Action').item.json.final_body }}\",\n  \"internal\": false\n}"
+      },
+      "name": "Zammad: Send Reply Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [900, 150],
+      "id": "send-reply",
+      "credentials": { "httpHeaderAuth": { "id": "zammad-api", "name": "Zammad API Token" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE ai_draft SET status='sent', approved_by=$1, approved_at=NOW(), sent_at=NOW() WHERE id=$2",
+        "queryParams": "={{ $('Validate Signature & Action').item.json.approved_by }},={{ $('Validate Signature & Action').item.json.draft_id }}"
+      },
+      "name": "DB: Mark Draft Sent",
+      "type": "n8n-nodes-base.postgres",
+      "position": [1100, 150],
+      "id": "mark-draft-sent",
+      "credentials": { "postgres": { "id": "pg-ai-buddy", "name": "PostgreSQL AI Buddy" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (actor_type, actor_id, action, entity_type, entity_id, metadata) VALUES ('user', $1, 'draft.approved', 'ticket', $2, $3::jsonb)",
+        "queryParams": "={{ $('Validate Signature & Action').item.json.approved_by }},={{ $('Validate Signature & Action').item.json.zammad_ticket_id }},={{ JSON.stringify({draft_id: $('Validate Signature & Action').item.json.draft_id, action: $('Validate Signature & Action').item.json.action}) }}"
+      },
+      "name": "DB: Audit Log",
+      "type": "n8n-nodes-base.postgres",
+      "position": [1300, 150],
+      "id": "audit-log",
+      "credentials": { "postgres": { "id": "pg-ai-buddy", "name": "PostgreSQL AI Buddy" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE ai_draft SET status='rejected' WHERE id=$1",
+        "queryParams": "={{ $('Validate Signature & Action').item.json.draft_id }}"
+      },
+      "name": "DB: Mark Draft Rejected",
+      "type": "n8n-nodes-base.postgres",
+      "position": [900, 350],
+      "id": "mark-rejected",
+      "credentials": { "postgres": { "id": "pg-ai-buddy", "name": "PostgreSQL AI Buddy" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_BASE_URL }}/webhook/escalation",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "zammad_ticket_id", "value": "={{ $('Validate Signature & Action').item.json.zammad_ticket_id }}" },
+            { "name": "reason", "value": "Manuell eskaliert durch Support-Mitarbeiter" },
+            { "name": "escalated_by", "value": "={{ $('Validate Signature & Action').item.json.approved_by }}" }
+          ]
+        }
+      },
+      "name": "Trigger: Escalation",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [900, 500],
+      "id": "trigger-escalation"
+    }
+  ],
+  "connections": {
+    "Webhook: Approval Action": { "main": [[{ "node": "Validate Signature & Action", "type": "main", "index": 0 }]] },
+    "Validate Signature & Action": { "main": [[{ "node": "Route by Action", "type": "main", "index": 0 }]] },
+    "Route by Action": {
+      "main": [
+        [{ "node": "Zammad: Send Reply Email", "type": "main", "index": 0 }],
+        [{ "node": "Zammad: Send Reply Email", "type": "main", "index": 0 }],
+        [{ "node": "DB: Mark Draft Rejected", "type": "main", "index": 0 }],
+        [{ "node": "Trigger: Escalation", "type": "main", "index": 0 }]
+      ]
+    },
+    "Zammad: Send Reply Email": { "main": [[{ "node": "DB: Mark Draft Sent", "type": "main", "index": 0 }]] },
+    "DB: Mark Draft Sent": { "main": [[{ "node": "DB: Audit Log", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["approval", "human-in-the-loop", "mvp"]
+}
