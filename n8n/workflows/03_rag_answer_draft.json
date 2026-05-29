@@ -1,0 +1,169 @@
+{
+  "name": "03 RAG Answer Draft",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "rag-answer-draft", "responseMode": "responseNode" },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "id": "webhook-trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT a.*, d.summary, d.category FROM ai_analysis a LEFT JOIN ai_analysis d ON d.id = a.id WHERE a.id = $1",
+        "queryParams": "={{ $json.analysis_id }}"
+      },
+      "name": "Load Analysis from DB",
+      "type": "n8n-nodes-base.postgres",
+      "position": [450, 300],
+      "id": "load-analysis",
+      "credentials": { "postgres": { "id": "pg-ai-buddy", "name": "PostgreSQL AI Buddy" } }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.ZAMMAD_BASE_URL }}/api/v1/tickets/={{ $('Webhook Trigger').item.json.zammad_ticket_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "name": "Zammad: Get Ticket Details",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 450],
+      "id": "zammad-get-ticket",
+      "credentials": { "httpHeaderAuth": { "id": "zammad-api", "name": "Zammad API Token" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AZURE_OPENAI_ENDPOINT }}/openai/deployments/text-embedding-3-large/embeddings?api-version=2024-02-15-preview",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"input\": \"{{ $('Zammad: Get Ticket Details').item.json.title }} {{ $('Zammad: Get Ticket Details').item.json.note }}\"\n}"
+      },
+      "name": "Azure OpenAI: Create Query Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [650, 300],
+      "id": "create-embedding",
+      "credentials": { "httpHeaderAuth": { "id": "azure-openai", "name": "Azure OpenAI API Key" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM search_knowledge($1::vector, 0.75, 5, $2)",
+        "queryParams": "={{ JSON.stringify($json.data[0].embedding) }},={{ $('Load Analysis from DB').item.json.category }}"
+      },
+      "name": "pgvector: Similarity Search",
+      "type": "n8n-nodes-base.postgres",
+      "position": [850, 300],
+      "id": "vector-search",
+      "credentials": { "postgres": { "id": "pg-ai-buddy", "name": "PostgreSQL AI Buddy" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// RAG Kontext aufbereiten\nconst chunks = $input.all();\nconst ticket = $('Zammad: Get Ticket Details').first().json;\n\nif (chunks.length === 0) {\n  return [{ json: { \n    hasContext: false,\n    ragContext: '',\n    sources: [],\n    missingContext: [{ reason: 'Keine relevanten Wissensquellen gefunden' }]\n  }}];\n}\n\nconst ragContext = chunks.map((c, i) => \n  `[Quelle ${i+1}: ${c.json.document_title}]\\n${c.json.chunk_text}`\n).join('\\n\\n---\\n\\n');\n\nconst sources = chunks.map(c => ({\n  document_id: c.json.document_id,\n  title: c.json.document_title,\n  source_uri: c.json.source_uri,\n  similarity: c.json.similarity\n}));\n\nreturn [{ json: { hasContext: true, ragContext, sources, missingContext: [] } }];"
+      },
+      "name": "Build RAG Context",
+      "type": "n8n-nodes-base.code",
+      "position": [1050, 300],
+      "id": "build-rag-context"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AZURE_OPENAI_ENDPOINT }}/openai/deployments/gpt-4o/chat/completions?api-version=2024-02-15-preview",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Du erstellst einen Kundenantwortvorschlag. Nutze ausschließlich den bereitgestellten Kontext. Wenn der Kontext nicht reicht, schreibe keine fachliche Antwort, sondern schlage eine Rückfrage oder Eskalation vor. Antworte auf {{ $('Load Analysis from DB').item.json.language }}.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Ticket Betreff: {{ $('Zammad: Get Ticket Details').item.json.title }}\\n\\nKundenanfrage wurde klassifiziert als: {{ $('Load Analysis from DB').item.json.category }}\\n\\nRAG-Kontext:\\n{{ $('Build RAG Context').item.json.ragContext }}\\n\\nErstelle eine freundliche, hilfreiche Antwort als JSON:\\n{\\n  \\\"draft_body\\\": \\\"Antworttext\\\",\\n  \\\"used_sources\\\": [\\\"source_ids\\\"],\\n  \\\"missing_context\\\": [],\\n  \\\"needs_human_approval\\\": true,\\n  \\\"confidence\\\": 0.0\\n}\"\n    }\n  ],\n  \"response_format\": {\"type\": \"json_object\"},\n  \"temperature\": 0.3,\n  \"max_tokens\": 1000\n}"
+      },
+      "name": "Azure OpenAI: Generate Draft",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1250, 300],
+      "id": "generate-draft",
+      "credentials": { "httpHeaderAuth": { "id": "azure-openai", "name": "Azure OpenAI API Key" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst content = response.choices?.[0]?.message?.content;\nlet draft;\ntry { draft = JSON.parse(content); } catch(e) { throw new Error('Draft JSON invalid'); }\n\nconst ragCtx = $('Build RAG Context').first().json;\nconst ticketId = $('Webhook Trigger').first().json.zammad_ticket_id;\nconst analysisId = $('Webhook Trigger').first().json.analysis_id;\n\nreturn [{ json: {\n  ...draft,\n  zammad_ticket_id: ticketId,\n  analysis_id: analysisId,\n  used_sources: ragCtx.sources,\n  missing_context: ragCtx.missingContext,\n  needs_human_approval: ragCtx.hasContext ? draft.needs_human_approval : true,\n  tone: 'friendly',\n  language: $('Load Analysis from DB').first().json.language\n}}];"
+      },
+      "name": "Parse & Enrich Draft",
+      "type": "n8n-nodes-base.code",
+      "position": [1450, 300],
+      "id": "parse-draft"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO ai_draft (zammad_ticket_id, analysis_id, draft_body, tone, language, confidence, needs_human_approval, used_sources, missing_context)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb)\nRETURNING id",
+        "queryParams": "={{ $json.zammad_ticket_id }},={{ $json.analysis_id }},={{ $json.draft_body }},={{ $json.tone }},={{ $json.language }},={{ $json.confidence }},={{ $json.needs_human_approval }},={{ JSON.stringify($json.used_sources) }},={{ JSON.stringify($json.missing_context) }}"
+      },
+      "name": "DB: Save AIDraft",
+      "type": "n8n-nodes-base.postgres",
+      "position": [1650, 300],
+      "id": "save-draft",
+      "credentials": { "postgres": { "id": "pg-ai-buddy", "name": "PostgreSQL AI Buddy" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ZAMMAD_BASE_URL }}/api/v1/ticket_articles",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ticket_id\": {{ $('Webhook Trigger').item.json.zammad_ticket_id }},\n  \"type\": \"note\",\n  \"sender\": \"Agent\",\n  \"internal\": true,\n  \"body\": \"🤖 **KI-Antwortvorschlag** (Konfidenz: {{ $('Parse & Enrich Draft').item.json.confidence }})\\n\\n{{ $('Parse & Enrich Draft').item.json.draft_body }}\\n\\n---\\n**Quellen:** {{ $('Parse & Enrich Draft').item.json.used_sources.map(s => s.title).join(', ') || 'Keine Quellen gefunden' }}\\n\\n**Draft-ID:** {{ $('DB: Save AIDraft').item.json.id }}\\n_Bitte prüfen und freigeben_\"\n}"
+      },
+      "name": "Zammad: Add Draft as Internal Note",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1850, 300],
+      "id": "zammad-add-note",
+      "credentials": { "httpHeaderAuth": { "id": "zammad-api", "name": "Zammad API Token" } }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $env.ZAMMAD_BASE_URL }}/api/v1/tickets/={{ $('Webhook Trigger').item.json.zammad_ticket_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"tags\": \"ai-draft-ready\"}"
+      },
+      "name": "Zammad: Tag Draft Ready",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [2050, 300],
+      "id": "zammad-tag",
+      "credentials": { "httpHeaderAuth": { "id": "zammad-api", "name": "Zammad API Token" } }
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ {\"status\": \"draft_ready\", \"draft_id\": $('DB: Save AIDraft').item.json.id} }}" },
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [2250, 300],
+      "id": "respond-ok"
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[
+        { "node": "Load Analysis from DB", "type": "main", "index": 0 },
+        { "node": "Zammad: Get Ticket Details", "type": "main", "index": 0 }
+      ]]
+    },
+    "Load Analysis from DB": { "main": [[{ "node": "Azure OpenAI: Create Query Embedding", "type": "main", "index": 0 }]] },
+    "Azure OpenAI: Create Query Embedding": { "main": [[{ "node": "pgvector: Similarity Search", "type": "main", "index": 0 }]] },
+    "pgvector: Similarity Search": { "main": [[{ "node": "Build RAG Context", "type": "main", "index": 0 }]] },
+    "Build RAG Context": { "main": [[{ "node": "Azure OpenAI: Generate Draft", "type": "main", "index": 0 }]] },
+    "Azure OpenAI: Generate Draft": { "main": [[{ "node": "Parse & Enrich Draft", "type": "main", "index": 0 }]] },
+    "Parse & Enrich Draft": { "main": [[{ "node": "DB: Save AIDraft", "type": "main", "index": 0 }]] },
+    "DB: Save AIDraft": { "main": [[{ "node": "Zammad: Add Draft as Internal Note", "type": "main", "index": 0 }]] },
+    "Zammad: Add Draft as Internal Note": { "main": [[{ "node": "Zammad: Tag Draft Ready", "type": "main", "index": 0 }]] },
+    "Zammad: Tag Draft Ready": { "main": [[{ "node": "Respond OK", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "saveManualExecutions": true },
+  "tags": ["rag", "draft", "ai", "mvp"]
+}
