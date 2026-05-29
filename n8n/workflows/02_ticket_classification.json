@@ -1,0 +1,144 @@
+{
+  "name": "02 Ticket Classification",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "ticket-classification", "responseMode": "responseNode" },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "id": "webhook-trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Systemkategorien und Prioritäten (später aus DB laden)\nconst categories = [\n  'billing', 'technical_issue', 'account_access',\n  'general_inquiry', 'complaint', 'cancellation',\n  'product_feedback', 'legal', 'security', 'other'\n];\n\nconst priorities = ['low', 'medium', 'high', 'urgent'];\n\nconst ticket = $input.first().json;\n\nconst systemPrompt = `Du bist ein Support-Klassifikationsdienst. Gib ausschließlich valides JSON gemäß Schema zurück.\nNutze nur die vorgegebenen Kategorien und Prioritäten. Wenn unsicher, setze confidence niedrig.\n\nKategorien: ${categories.join(', ')}\nPrioritäten: ${priorities.join(', ')}`;\n\nconst userPrompt = `Ticket:\nBetreff: ${ticket.subject}\nNachricht: ${ticket.body}\nAbsender: ${ticket.from_email}\n\nSchema:\n{\n  \"language\": \"de|en|...\",\n  \"category\": \"string aus Kategorieliste\",\n  \"priority\": \"low|medium|high|urgent\",\n  \"sentiment\": \"neutral|positive|frustrated|angry|critical\",\n  \"urgency\": \"low|normal|high|critical\",\n  \"needs_customer_clarification\": false,\n  \"is_automatable\": false,\n  \"escalation_required\": false,\n  \"reasoning_short\": \"max 2 Sätze\",\n  \"confidence\": 0.0\n}`;\n\nreturn [{ json: { systemPrompt, userPrompt, zammad_ticket_id: ticket.zammad_ticket_id } }];"
+      },
+      "name": "Build Classification Prompt",
+      "type": "n8n-nodes-base.code",
+      "position": [450, 300],
+      "id": "build-prompt"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AZURE_OPENAI_ENDPOINT }}/openai/deployments/gpt-4o/chat/completions?api-version=2024-02-15-preview",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messages\": [\n    {\"role\": \"system\", \"content\": \"{{ $json.systemPrompt }}\"},\n    {\"role\": \"user\", \"content\": \"{{ $json.userPrompt }}\"}\n  ],\n  \"response_format\": {\"type\": \"json_object\"},\n  \"temperature\": 0.1,\n  \"max_tokens\": 500\n}"
+      },
+      "name": "Azure OpenAI: Classify",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [650, 300],
+      "id": "openai-classify",
+      "credentials": { "httpHeaderAuth": { "id": "azure-openai", "name": "Azure OpenAI API Key" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// JSON validieren und parsen\nconst response = $input.first().json;\nconst content = response.choices?.[0]?.message?.content;\n\nlet classification;\ntry {\n  classification = JSON.parse(content);\n} catch(e) {\n  throw new Error(`KI-Ausgabe ist kein valides JSON: ${content}`);\n}\n\n// Schema validieren\nconst required = ['language','category','priority','sentiment','escalation_required','confidence'];\nfor (const field of required) {\n  if (classification[field] === undefined) {\n    throw new Error(`Pflichtfeld fehlt in KI-Ausgabe: ${field}`);\n  }\n}\n\nconst zammadTicketId = $('Build Classification Prompt').first().json.zammad_ticket_id;\n\nreturn [{ json: { ...classification, zammad_ticket_id: zammadTicketId, prompt_version: 'v1.0' } }];"
+      },
+      "name": "Validate JSON Schema",
+      "type": "n8n-nodes-base.code",
+      "position": [850, 300],
+      "id": "validate-json"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO ai_analysis (zammad_ticket_id, model, prompt_version, language, category, priority, sentiment, urgency, needs_clarification, is_automatable, escalation_required, confidence, reasoning_short)\nVALUES ($1, 'gpt-4o', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)\nRETURNING id",
+        "queryParams": "={{ $json.zammad_ticket_id }},={{ $json.prompt_version }},={{ $json.language }},={{ $json.category }},={{ $json.priority }},={{ $json.sentiment }},={{ $json.urgency }},={{ $json.needs_customer_clarification }},={{ $json.is_automatable }},={{ $json.escalation_required }},={{ $json.confidence }},={{ $json.reasoning_short }}"
+      },
+      "name": "DB: Save AIAnalysis",
+      "type": "n8n-nodes-base.postgres",
+      "position": [1050, 300],
+      "id": "save-analysis",
+      "credentials": { "postgres": { "id": "pg-ai-buddy", "name": "PostgreSQL AI Buddy" } }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $env.ZAMMAD_BASE_URL }}/api/v1/tickets/={{ $('Validate JSON Schema').item.json.zammad_ticket_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"priority\": \"{{ $('Validate JSON Schema').item.json.priority === 'urgent' ? '3 hoch' : $('Validate JSON Schema').item.json.priority === 'high' ? '3 hoch' : $('Validate JSON Schema').item.json.priority === 'low' ? '1 niedrig' : '2 normal' }}\",\n  \"note\": \"KI-Klassifikation: {{ $('Validate JSON Schema').item.json.category }} (Konfidenz: {{ $('Validate JSON Schema').item.json.confidence }})\"\n}"
+      },
+      "name": "Zammad: Update Priority",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1250, 300],
+      "id": "zammad-update",
+      "credentials": { "httpHeaderAuth": { "id": "zammad-api", "name": "Zammad API Token" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [{ "value1": "={{ $('Validate JSON Schema').item.json.escalation_required }}", "value2": true }]
+        }
+      },
+      "name": "Needs Escalation?",
+      "type": "n8n-nodes-base.if",
+      "position": [1450, 300],
+      "id": "check-escalation"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_BASE_URL }}/webhook/escalation",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "zammad_ticket_id", "value": "={{ $('Validate JSON Schema').item.json.zammad_ticket_id }}" },
+            { "name": "reason", "value": "={{ $('Validate JSON Schema').item.json.reasoning_short }}" }
+          ]
+        }
+      },
+      "name": "Trigger: Escalation Workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1650, 200],
+      "id": "trigger-escalation"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_BASE_URL }}/webhook/rag-answer-draft",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "zammad_ticket_id", "value": "={{ $('Validate JSON Schema').item.json.zammad_ticket_id }}" },
+            { "name": "analysis_id", "value": "={{ $('DB: Save AIAnalysis').item.json.id }}" },
+            { "name": "needs_human_approval", "value": "={{ !$('Validate JSON Schema').item.json.is_automatable }}" }
+          ]
+        }
+      },
+      "name": "Trigger: RAG Draft Workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1650, 400],
+      "id": "trigger-rag"
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ {\"status\": \"classified\", \"analysis_id\": $('DB: Save AIAnalysis').item.json.id} }}" },
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1850, 300],
+      "id": "respond-ok"
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Build Classification Prompt", "type": "main", "index": 0 }]] },
+    "Build Classification Prompt": { "main": [[{ "node": "Azure OpenAI: Classify", "type": "main", "index": 0 }]] },
+    "Azure OpenAI: Classify": { "main": [[{ "node": "Validate JSON Schema", "type": "main", "index": 0 }]] },
+    "Validate JSON Schema": { "main": [[{ "node": "DB: Save AIAnalysis", "type": "main", "index": 0 }]] },
+    "DB: Save AIAnalysis": { "main": [[{ "node": "Zammad: Update Priority", "type": "main", "index": 0 }]] },
+    "Zammad: Update Priority": { "main": [[{ "node": "Needs Escalation?", "type": "main", "index": 0 }]] },
+    "Needs Escalation?": {
+      "main": [
+        [{ "node": "Trigger: Escalation Workflow", "type": "main", "index": 0 }],
+        [{ "node": "Trigger: RAG Draft Workflow", "type": "main", "index": 0 }]
+      ]
+    },
+    "Trigger: RAG Draft Workflow": { "main": [[{ "node": "Respond OK", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "saveManualExecutions": true },
+  "tags": ["classification", "ai", "mvp"]
+}
