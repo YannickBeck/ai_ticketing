@@ -1,124 +1,202 @@
-# Spargelstand-App
+# AI Ticketing Buddy — Azure
 
-Die Spargelstand-App ist ein standortbasierter Preorder- und Pickup-Marktplatz für dezentrale landwirtschaftliche Verkaufsstände. Kunden finden Stände in ihrer Nähe, sehen Produktverfügbarkeiten, reservieren Ware verbindlich, bezahlen digital und holen die Bestellung per QR-Code ab. Optional erhalten Kunden transaktionale WhatsApp-Updates zu Bestellung, Zahlung und Abholung.
+KI-gestütztes Support-Ticketsystem auf Azure. n8n orchestriert Workflows zwischen Zammad, Azure OpenAI, pgvector und Azure AI Speech.
 
-Der wichtigste Produktnutzen ist die Garantie: Eine bezahlte Reservierung muss bei Abholung tatsächlich verfügbar sein.
+## Architektur
 
-## MVP-Ziel
-
-Das MVP soll beweisen, dass Kunden für eine garantierte Reservierung eine kleine Service Fee akzeptieren und dass Produzenten durch Reservierungsdaten bessere Bestands- und Lieferentscheidungen treffen können.
-
-Der MVP-Kernflow ist:
-
-```text
-Kunde findet Stand
--> sieht Verfügbarkeit
--> reserviert Menge und Abholzeitfenster
--> bezahlt digital
--> erhält QR-Code
--> erhält optional WhatsApp-Statusupdates mit sicherem QR-Link
--> holt Ware am Stand ab
--> Produzent sieht Nachfrage und Bestandswirkung
+```
+M365/Exchange Online (Graph API)
+         ↓
+Azure Container Apps
+  ├── n8n            (Workflow Engine)
+  ├── Zammad         (Ticket UI)
+  ├── Redis          (Zammad Sessions)
+  └── Elasticsearch  (Zammad Suche)
+         ↓
+Azure Database for PostgreSQL
+  ├── DB: ai_buddy   (AI-Metadaten + pgvector)
+  └── DB: zammad     (Tickets)
+         ↓
+Azure OpenAI (GPT-4o + text-embedding-3-large)
+Azure AI Speech (Speech-to-Text)
+Azure Blob Storage (Anhänge + Audio)
+Azure Key Vault (Secrets)
 ```
 
-## Hauptfunktionen
+## Deployment (Reihenfolge)
 
-| Bereich | MVP-Funktion |
-| --- | --- |
-| Standortsuche | Karte und Liste mit Ständen in der Nähe, Entfernung, Öffnungsstatus und Navigation |
-| Produktverfügbarkeit | Verfügbare Produkte je Stand auf Basis von Bestand, Reservierungen und Sicherheitsbestand |
-| Reservierung | Verbindliche Reservierung mit Menge, Abholzeitfenster und temporärer Bestandsblockierung |
-| Zahlung | Digitale Zahlung über Stripe Connect mit Service Fee |
-| QR-Code-Abholung | Bestell-QR-Code zur schnellen Abholung und One-Time-Use-Validierung |
-| WhatsApp Order Updates | Optionaler P1-Pilotkanal für Bestellbestätigung, Abholerinnerung, Statusänderungen und sicheren Link zur QR-Code-Seite |
-| Admin-Dashboard | Stände, Produkte, Bestände, Reservierungen, Nachfrage und einfache Lieferempfehlungen |
-| Mitarbeiteransicht | Mobile-first Ansicht für offene Bestellungen, QR-Scan, Bestandsupdates und Out-of-Stock |
-
-## Rollen
-
-| Rolle | Zweck |
-| --- | --- |
-| Kunde | Stände finden, Produkte reservieren, bezahlen und per QR-Code abholen |
-| Spargelbauer/Admin | Betrieb, Stände, Produkte, Preise, Bestände, Reservierungen und Mitarbeiter verwalten |
-| Stand-Mitarbeiter | Offene Bestellungen bearbeiten, QR-Codes scannen und Bestände am Stand aktualisieren |
-| Plattformadmin | Produzenten, Gebühren, Supportfälle, Zahlungslogs und Plattformbetrieb verwalten |
-
-## Empfohlener Tech-Stack
-
-| Baustein | Empfehlung |
-| --- | --- |
-| Web-App/PWA | Next.js mit TypeScript für Kunde, Admin und Stand-Mitarbeiter |
-| Backend | Next.js API Routes als modularer MVP-Backend-Layer, später optional NestJS |
-| Datenbank | PostgreSQL mit Prisma ORM |
-| Geo-Suche | PostGIS oder geobasierte Standortsuche über Latitude/Longitude und Radiusfilter |
-| Auth | Auth.js, Supabase Auth oder vergleichbare Lösung mit serverseitigem RBAC |
-| Payment | Stripe Connect als primärer Provider, PayPal optional später |
-| QR-Code | Serverseitige Generierung signierter QRToken ohne sensible Daten |
-| Notification | Notification Service für E-Mail und WhatsApp über WhatsApp Business Platform oder Provider wie Twilio, Bird/MessageBird oder 360dialog |
-| Hosting | Azure App Service als bevorzugte Option, alternativ Vercel, Render oder Railway |
-| Monitoring | Application Insights oder Sentry plus strukturiertes Logging |
-
-## Dokumentation
-
-| Dokument | Inhalt |
-| --- | --- |
-| [Produktvision](docs/01-product-vision.md) | Problem, Lösung, Zielgruppen, USP und Nicht-Ziele |
-| [MVP-Scope](docs/02-mvp-scope.md) | P0/P1/P2, Phase-2-Abgrenzung und Abnahmekriterien |
-| [Rollen und Rechte](docs/03-user-roles-and-permissions.md) | Zugriffsmatrix und Sicherheitsregeln |
-| [User Stories](docs/04-user-stories.md) | Stories, Prioritäten und Akzeptanzkriterien |
-| [Technische Architektur](docs/05-technical-architecture.md) | Zielarchitektur, Mermaid-Diagramm und Kernmodule |
-| [Tech-Stack](docs/06-tech-stack.md) | Stack-Entscheidungen, Alternativen und Kriterien |
-| [Datenmodell](docs/07-data-model.md) | Entitäten, Beziehungen und ER-Diagramm |
-| [API-Design](docs/08-api-design.md) | REST-Endpunkte, Beispiele, Fehlercodes und RBAC |
-| [Reservierung, Zahlung, Abholung](docs/09-reservation-payment-pickup-flow.md) | End-to-End-Prozess, Sequenzdiagramm und Edge Cases |
-| [Inventory Engine](docs/10-inventory-engine.md) | Bestandslogik, Blockierung, Events und Sicherheitsbestand |
-| [QR-Code-Konzept](docs/11-qr-code-concept.md) | QR-Typen, Token-Sicherheit und Scan-Prozess |
-| [Payment und Geschäftsmodell](docs/12-payment-and-business-model.md) | Service Fee, Stripe Connect, Refunds und Modellvarianten |
-| [Admin-Dashboard](docs/13-admin-dashboard.md) | Seitenstruktur, Tabellen, Kennzahlen und Lieferempfehlungen |
-| [Mitarbeiteransicht](docs/14-staff-interface.md) | Mobile-first Bedienung am Stand |
-| [Frontend-Plan](docs/15-frontend-plan.md) | Next.js-Routen, Komponenten, State und PWA |
-| [Backend-Plan](docs/16-backend-plan.md) | Services, Domainlogik, Transaktionen, Webhooks und Cronjobs |
-| [Security und Compliance](docs/17-security-and-compliance.md) | DSGVO, RBAC, QR-Sicherheit, Webhooks und Secrets |
-| [Testing-Plan](docs/18-testing-plan.md) | Unit, Integration, E2E, Payment, QR und Concurrency |
-| [DevOps und Deployment](docs/19-devops-and-deployment.md) | Lokale Umgebung, CI/CD, Azure App Service, Monitoring und Backup |
-| [Roadmap](docs/20-roadmap.md) | 10-14-Wochen-Plan, Meilensteine und Phase-2-Erweiterungen |
-| [Backlog](docs/21-backlog.md) | Epics, Tasks, Prioritäten, Komplexität und Sprintplanung |
-| [Offene Fragen](docs/22-open-questions.md) | Produkt-, Technik-, Rechtsfragen, Annahmen und Risiken |
-| [WhatsApp Notifications](docs/features/whatsapp-notifications.md) | Feature-Spezifikation für WhatsApp Order Updates als optionaler Bestellbegleiter |
-
-## Lokale Entwicklungsübersicht
-
-Empfohlene lokale Struktur für die Umsetzung:
-
-```text
-spargelstand-app/
-  app/                  Next.js App Router
-  components/           UI-Komponenten
-  server/               Domain Services und serverseitige Logik
-  prisma/               Prisma Schema und Migrationen
-  docs/                 Technische und produktbezogene Dokumentation
-```
-
-Erwarteter Entwicklungsablauf:
+### Schritt 1: GitHub Repo + Secrets
 
 ```bash
-npm install
-cp .env.example .env.local
-npm run db:check
-npm run prisma:migrate
-npm run prisma:seed
-npm run smoke:p0
-npm run dev
+# GitHub Actions Secrets setzen:
+# AZURE_CREDENTIALS  → Service Principal JSON
+# PG_ADMIN_PASSWORD  → PostgreSQL Admin Passwort
+# PG_HOST            → Nach Bicep Deploy eintragen
+# PG_AI_BUDDY_PASSWORD
+# N8N_API_KEY        → Nach n8n Setup eintragen
+# N8N_BASE_URL       → Nach Bicep Deploy eintragen
 ```
 
-Die lokale Entwicklung nutzt bewusst keinen Docker-Pfad. PostgreSQL muss lokal installiert oder als eigener Dienst erreichbar sein. Die Standardwerte aus `.env.example` erwarten Datenbank `spargelstand_app`, User `postgres`, Passwort `postgres` auf `localhost:5432`.
-
-`npm run db:check` prüft nur die Verbindung zur `DATABASE_URL`; der Befehl startet keine Datenbank.
-
-`npm run smoke:p0` prüft den DB-backed Kernfluss lokal: Reservierung, Inventory-Hold, Payment-Success-Simulation, QR-Erzeugung, Staff-Scan und Pickup. Der Smoke-Test gibt keine QR-Klartexte, Payment-Payloads oder vollständigen Telefonnummern aus.
-
-Für echte Stripe Webhooks im MVP sollte zusätzlich die Stripe CLI genutzt werden:
+### Schritt 2: Azure Service Principal anlegen
 
 ```bash
-stripe listen --forward-to localhost:3000/api/v1/webhooks/stripe
+az login
+
+# Service Principal für GitHub Actions
+az ad sp create-for-rbac \
+  --name "sp-ai-ticketing-github" \
+  --role contributor \
+  --scopes /subscriptions/SUBSCRIPTION_ID \
+  --sdk-auth \
+  > azure-credentials.json
+# Inhalt als AZURE_CREDENTIALS Secret in GitHub eintragen
+# azure-credentials.json danach löschen!
 ```
+
+### Schritt 3: Infrastruktur deployen
+
+```bash
+# Subscription ID in params.prod.json eintragen
+# Dann push auf main oder manuell:
+gh workflow run deploy-infra.yml
+```
+
+### Schritt 4: Key Vault befüllen
+
+```bash
+KEYVAULT=kv-aiticketing-prod
+
+# PostgreSQL
+az keyvault secret set --vault-name $KEYVAULT --name pg-admin-password --value "DEIN_PG_PASSWORD"
+az keyvault secret set --vault-name $KEYVAULT --name pg-n8n-password --value "DEIN_PG_PASSWORD"
+az keyvault secret set --vault-name $KEYVAULT --name pg-zammad-password --value "DEIN_PG_PASSWORD"
+
+# n8n
+az keyvault secret set --vault-name $KEYVAULT --name n8n-encryption-key --value "$(openssl rand -hex 16)"
+
+# Zammad
+az keyvault secret set --vault-name $KEYVAULT --name zammad-secret-token --value "$(openssl rand -hex 32)"
+
+# Azure OpenAI Key (aus Azure Portal)
+az keyvault secret set --vault-name $KEYVAULT --name openai-api-key --value "DEIN_OPENAI_KEY"
+
+# Azure Speech Key (aus Azure Portal)
+az keyvault secret set --vault-name $KEYVAULT --name speech-api-key --value "DEIN_SPEECH_KEY"
+
+# Microsoft Graph
+az keyvault secret set --vault-name $KEYVAULT --name graph-client-secret --value "DEIN_GRAPH_SECRET"
+
+# Webhook Signing
+az keyvault secret set --vault-name $KEYVAULT --name webhook-signing-secret --value "$(openssl rand -hex 32)"
+```
+
+### Schritt 5: DB Migrations ausführen
+
+```bash
+gh workflow run deploy-db-migrations.yml
+```
+
+Oder manuell:
+```bash
+for f in db/migrations/*.sql; do
+  psql "$PG_AI_BUDDY_URL" -f "$f"
+done
+```
+
+### Schritt 6: Entra ID App Registration (Microsoft Graph)
+
+```bash
+# App anlegen
+APP_ID=$(az ad app create --display-name "AI-Ticketing-Graph" --query appId -o tsv)
+
+# Permissions: Mail.ReadWrite + Mail.Send (Application)
+az ad app permission add \
+  --id $APP_ID \
+  --api 00000003-0000-0000-c000-000000000000 \
+  --api-permissions 810c84a8-4a9e-49e6-bf7d-12d183f40d01=Role \
+                    b633e1c5-b582-4048-a93e-9f11b44c7e96=Role
+
+# Admin Consent erteilen (Global Admin erforderlich)
+az ad app permission admin-consent --id $APP_ID
+
+# Client Secret erstellen
+az ad app credential reset --id $APP_ID --append
+# Secret → in Key Vault speichern
+```
+
+### Schritt 7: n8n Setup
+
+1. n8n URL aufrufen: `https://ca-n8n-prod.azurecontainerapps.io`
+2. Admin-Account anlegen
+3. Credentials anlegen:
+   - **Azure OpenAI**: HTTP Header Auth → `api-key: [Key Vault Wert]`
+   - **PostgreSQL AI Buddy**: Host, DB `ai_buddy`, SSL
+   - **Zammad API**: HTTP Header Auth → `Authorization: Token token=...`
+   - **Microsoft Graph OAuth2**: Client ID, Secret, Tenant ID
+   - **Azure Speech**: HTTP Header Auth → `Ocp-Apim-Subscription-Key: ...`
+4. Workflows importieren: alle JSONs aus `n8n/workflows/`
+5. Alle 10 Workflows aktivieren
+
+### Schritt 8: Zammad Setup
+
+1. Zammad URL aufrufen: `https://ca-zammad-prod.azurecontainerapps.io`
+2. Setup Wizard durchführen
+3. E-Mail-Kanal: Microsoft 365 mit Graph API OAuth2
+4. Gruppen anlegen: `Support`, `Eskalation`, `Admin`
+5. SLA-Policies gemäß Konzept konfigurieren
+6. Tags anlegen: `ai-draft-ready`, `escalated`, `feedback-given`
+7. API Token generieren → in Key Vault als `zammad-api-token` speichern
+8. Container App neu starten damit n8n den Token bekommt
+
+### Schritt 9: E2E Test
+
+```bash
+# Test-Mail an Support-Mailbox senden
+# Dann prüfen:
+# 1. Zammad: Neues Ticket erscheint
+# 2. n8n Executions: Workflow 01+02+03 erfolgreich
+# 3. PostgreSQL ai_buddy: ai_analysis + ai_draft Einträge vorhanden
+# 4. Zammad: Interne Notiz mit KI-Draft sichtbar
+```
+
+## Projektstruktur
+
+```
+ai-ticketing-buddy/
+├── infra/               Azure Bicep IaC
+│   ├── main.bicep
+│   └── modules/
+├── db/migrations/       PostgreSQL Migrations (ai_buddy DB)
+├── n8n/workflows/       n8n Workflow JSON (importierbar)
+├── .github/workflows/   CI/CD Pipeline
+├── .env.example         Environment Template
+└── README.md
+```
+
+## Kosten (Schätzung MVP)
+
+| Dienst | ~Monat |
+|---|---|
+| Azure Container Apps (n8n+Zammad+Redis+ES) | 80–150 € |
+| PostgreSQL Flexible Server (B2s) | 35–50 € |
+| Azure Blob Storage | 5–15 € |
+| Azure OpenAI (variabel, ~100 Tickets/Tag) | 50–200 € |
+| Azure AI Speech | 1–10 € |
+| Azure Key Vault | < 5 € |
+| **Gesamt ohne OpenAI-Verbrauch** | **~120–220 €/Monat** |
+
+## Sicherheitshinweise
+
+- Alle Secrets ausschließlich über Azure Key Vault
+- `.env` niemals committen
+- Webhook-Signatur (HMAC-SHA256) in Workflow 04 validiert
+- pgvector Similarity Threshold ≥ 0.75 → verhindert irrelevante RAG-Ergebnisse
+- Auto-Antwort im MVP deaktiviert — Human Approval ist Standard
+
+## Weiterführende Ressourcen
+
+- [Zammad REST API Dokumentation](https://docs.zammad.org/en/latest/api/intro.html)
+- [Azure OpenAI Service](https://learn.microsoft.com/azure/ai-services/openai/)
+- [pgvector](https://github.com/pgvector/pgvector)
+- [n8n Docs](https://docs.n8n.io/)
+- [Azure Container Apps](https://learn.microsoft.com/azure/container-apps/)
