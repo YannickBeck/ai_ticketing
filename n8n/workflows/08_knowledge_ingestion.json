@@ -1,0 +1,89 @@
+{
+  "name": "08 Knowledge Ingestion",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "ingest-document", "responseMode": "responseNode" },
+      "name": "Webhook: Ingest Document",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "id": "webhook-ingest"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.source_uri }}",
+        "options": { "response": { "response": { "responseFormat": "file" } } }
+      },
+      "name": "Fetch Document",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "id": "fetch-doc"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Text chunken: ~500 Token, 50 Token Overlap\n// Einfache Implementierung via Zeichenanzahl (ca. 1 Token ≈ 4 Zeichen)\nconst text = $input.first().json.text || $input.first().binary?.data?.toString('utf8') || '';\nconst chunkSize = 2000;  // ~500 Token\nconst overlap = 200;     // ~50 Token\n\nconst chunks = [];\nlet start = 0;\nlet chunkIndex = 0;\n\nwhile (start < text.length) {\n  const end = Math.min(start + chunkSize, text.length);\n  const chunk = text.slice(start, end);\n  \n  if (chunk.trim().length > 50) {  // Leere/kurze Chunks überspringen\n    chunks.push({\n      json: {\n        chunkIndex,\n        text: chunk.trim(),\n        tokenCount: Math.round(chunk.length / 4),\n        documentId: $('Webhook: Ingest Document').first().json.document_id,\n        metadata: {\n          sourceUri: $('Webhook: Ingest Document').first().json.source_uri,\n          chunkStart: start,\n          chunkEnd: end\n        }\n      }\n    });\n    chunkIndex++;\n  }\n  \n  start = end - overlap;\n}\n\nreturn chunks;"
+      },
+      "name": "Chunk Text",
+      "type": "n8n-nodes-base.code",
+      "position": [650, 300],
+      "id": "chunk-text"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AZURE_OPENAI_ENDPOINT }}/openai/deployments/text-embedding-3-large/embeddings?api-version=2024-02-15-preview",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"input\": \"{{ $json.text }}\"}"
+      },
+      "name": "Azure OpenAI: Create Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [850, 300],
+      "id": "create-embedding",
+      "credentials": { "httpHeaderAuth": { "id": "azure-openai", "name": "Azure OpenAI API Key" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO knowledge_chunk (document_id, chunk_index, text, token_count, metadata, embedding)\nVALUES ($1, $2, $3, $4, $5::jsonb, $6::vector)\nON CONFLICT DO NOTHING\nRETURNING id",
+        "queryParams": "={{ $('Chunk Text').item.json.documentId }},={{ $('Chunk Text').item.json.chunkIndex }},={{ $('Chunk Text').item.json.text }},={{ $('Chunk Text').item.json.tokenCount }},={{ JSON.stringify($('Chunk Text').item.json.metadata) }},={{ JSON.stringify($json.data[0].embedding) }}"
+      },
+      "name": "DB: Save Chunk + Embedding",
+      "type": "n8n-nodes-base.postgres",
+      "position": [1050, 300],
+      "id": "save-chunk",
+      "credentials": { "postgres": { "id": "pg-ai-buddy", "name": "PostgreSQL AI Buddy" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE knowledge_document SET status='active', last_ingested_at=NOW() WHERE id=$1",
+        "queryParams": "={{ $('Webhook: Ingest Document').first().json.document_id }}"
+      },
+      "name": "DB: Mark Document Active",
+      "type": "n8n-nodes-base.postgres",
+      "position": [1250, 300],
+      "id": "mark-active",
+      "credentials": { "postgres": { "id": "pg-ai-buddy", "name": "PostgreSQL AI Buddy" } }
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ {\"status\": \"ingested\", \"chunks\": $('DB: Save Chunk + Embedding').all().length} }}" },
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1450, 300],
+      "id": "respond-ok"
+    }
+  ],
+  "connections": {
+    "Webhook: Ingest Document": { "main": [[{ "node": "Fetch Document", "type": "main", "index": 0 }]] },
+    "Fetch Document": { "main": [[{ "node": "Chunk Text", "type": "main", "index": 0 }]] },
+    "Chunk Text": { "main": [[{ "node": "Azure OpenAI: Create Embedding", "type": "main", "index": 0 }]] },
+    "Azure OpenAI: Create Embedding": { "main": [[{ "node": "DB: Save Chunk + Embedding", "type": "main", "index": 0 }]] },
+    "DB: Save Chunk + Embedding": { "main": [[{ "node": "DB: Mark Document Active", "type": "main", "index": 0 }]] },
+    "DB: Mark Document Active": { "main": [[{ "node": "Respond OK", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["rag", "knowledge", "ingestion"]
+}
