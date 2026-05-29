@@ -1,0 +1,143 @@
+{
+  "name": "05 Voice Message Intake",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "voice-upload", "responseMode": "responseNode", "options": { "binaryData": true } },
+      "name": "Webhook: Voice Upload",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "id": "webhook-voice"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validierung: Dateiformat und Größe\nconst body = $input.first().json;\nconst allowedMimes = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/webm', 'audio/m4a'];\nconst maxSizeBytes = 25 * 1024 * 1024; // 25 MB\n\nif (!allowedMimes.includes(body.mimeType)) {\n  throw new Error(`Ungültiges Format: ${body.mimeType}. Erlaubt: ${allowedMimes.join(', ')}`);\n}\n\nif (body.fileSizeBytes > maxSizeBytes) {\n  throw new Error(`Datei zu groß: ${body.fileSizeBytes} Bytes. Max: 25 MB`);\n}\n\nreturn [{ json: {\n  ...body,\n  blobName: `voice-audio/${Date.now()}_${body.originalFilename || 'voice.mp3'}`,\n  idempotencyKey: `voice_intake_${body.checksum || Date.now()}`\n}}];"
+      },
+      "name": "Validate File",
+      "type": "n8n-nodes-base.code",
+      "position": [450, 300],
+      "id": "validate-file"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $env.BLOB_STORAGE_URL }}/voice-audio/={{ $json.blobName }}?{{ $env.BLOB_SAS_TOKEN }}",
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data"
+      },
+      "name": "Azure Blob: Upload Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [650, 300],
+      "id": "blob-upload"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://{{ $env.SPEECH_REGION }}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language={{ $('Validate File').item.json.language || 'de-DE' }}&format=detailed",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": { "timeout": 60000 }
+      },
+      "name": "Azure Speech: Transcribe",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [850, 300],
+      "id": "speech-transcribe",
+      "credentials": { "httpHeaderAuth": { "id": "azure-speech", "name": "Azure Speech API Key" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "const sttResponse = $input.first().json;\nconst transcript = sttResponse.DisplayText || sttResponse.NBest?.[0]?.Display || '';\nconst confidence = sttResponse.NBest?.[0]?.Confidence || 0;\n\nreturn [{ json: { transcript, confidence, sttStatus: sttResponse.RecognitionStatus } }];"
+      },
+      "name": "Extract Transcript",
+      "type": "n8n-nodes-base.code",
+      "position": [1050, 300],
+      "id": "extract-transcript"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AZURE_OPENAI_ENDPOINT }}/openai/deployments/gpt-4o/chat/completions?api-version=2024-02-15-preview",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messages\": [\n    {\"role\": \"system\", \"content\": \"Du erhältst ein Transkript einer Voice Message. Fasse zusammen: Anliegen, genannte Namen/IDs/Produkte, Dringlichkeit, offene Punkte, empfohlene Kategorie. Korrigiere offensichtliche Transkriptionsfehler nur vorsichtig.\"},\n    {\"role\": \"user\", \"content\": \"Transkript: {{ $('Extract Transcript').item.json.transcript }}\"}\n  ],\n  \"response_format\": {\"type\": \"json_object\"},\n  \"temperature\": 0.2\n}"
+      },
+      "name": "Azure OpenAI: Summarize Voice",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1250, 300],
+      "id": "summarize-voice",
+      "credentials": { "httpHeaderAuth": { "id": "azure-openai", "name": "Azure OpenAI API Key" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ZAMMAD_BASE_URL }}/api/v1/tickets",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"title\": \"Voice Message: {{ JSON.parse($('Azure OpenAI: Summarize Voice').item.json.choices[0].message.content).subject || 'Eingehende Voice Message' }}\",\n  \"group\": \"Support\",\n  \"customer\": \"{{ $('Validate File').item.json.fromEmail || 'unknown@customer.com' }}\",\n  \"state\": \"new\",\n  \"priority\": \"2 normal\",\n  \"note\": \"📞 Voice Message empfangen\\n\\n**Transkript:**\\n{{ $('Extract Transcript').item.json.transcript }}\\n\\n**KI-Zusammenfassung:**\\n{{ $('Azure OpenAI: Summarize Voice').item.json.choices[0].message.content }}\"\n}"
+      },
+      "name": "Zammad: Create Ticket",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1450, 300],
+      "id": "create-ticket",
+      "credentials": { "httpHeaderAuth": { "id": "zammad-api", "name": "Zammad API Token" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO voice_message (zammad_ticket_id, storage_url, blob_name, original_filename, mime_type, file_size_bytes, transcript, transcript_confidence, stt_provider, stt_processed_at, ai_summary)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'azure_speech', NOW(), $9)\nRETURNING id",
+        "queryParams": "={{ $('Zammad: Create Ticket').item.json.id }},={{ $env.BLOB_STORAGE_URL + '/voice-audio/' + $('Validate File').item.json.blobName }},={{ $('Validate File').item.json.blobName }},={{ $('Validate File').item.json.originalFilename }},={{ $('Validate File').item.json.mimeType }},={{ $('Validate File').item.json.fileSizeBytes }},={{ $('Extract Transcript').item.json.transcript }},={{ $('Extract Transcript').item.json.confidence }},={{ $('Azure OpenAI: Summarize Voice').item.json.choices[0].message.content }}"
+      },
+      "name": "DB: Save VoiceMessage",
+      "type": "n8n-nodes-base.postgres",
+      "position": [1650, 300],
+      "id": "save-voice-message",
+      "credentials": { "postgres": { "id": "pg-ai-buddy", "name": "PostgreSQL AI Buddy" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_BASE_URL }}/webhook/ticket-classification",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "zammad_ticket_id", "value": "={{ $('Zammad: Create Ticket').item.json.id }}" },
+            { "name": "subject", "value": "Voice Message" },
+            { "name": "body", "value": "={{ $('Extract Transcript').item.json.transcript }}" },
+            { "name": "from_email", "value": "={{ $('Validate File').item.json.fromEmail || '' }}" }
+          ]
+        }
+      },
+      "name": "Trigger: Classification",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1850, 300],
+      "id": "trigger-classification"
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ {\"status\": \"created\", \"zammad_ticket_id\": $('Zammad: Create Ticket').item.json.id, \"transcript_confidence\": $('Extract Transcript').item.json.confidence} }}" },
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [2050, 300],
+      "id": "respond-ok"
+    }
+  ],
+  "connections": {
+    "Webhook: Voice Upload": { "main": [[{ "node": "Validate File", "type": "main", "index": 0 }]] },
+    "Validate File": { "main": [[{ "node": "Azure Blob: Upload Audio", "type": "main", "index": 0 }]] },
+    "Azure Blob: Upload Audio": { "main": [[{ "node": "Azure Speech: Transcribe", "type": "main", "index": 0 }]] },
+    "Azure Speech: Transcribe": { "main": [[{ "node": "Extract Transcript", "type": "main", "index": 0 }]] },
+    "Extract Transcript": { "main": [[{ "node": "Azure OpenAI: Summarize Voice", "type": "main", "index": 0 }]] },
+    "Azure OpenAI: Summarize Voice": { "main": [[{ "node": "Zammad: Create Ticket", "type": "main", "index": 0 }]] },
+    "Zammad: Create Ticket": { "main": [[{ "node": "DB: Save VoiceMessage", "type": "main", "index": 0 }]] },
+    "DB: Save VoiceMessage": { "main": [[{ "node": "Trigger: Classification", "type": "main", "index": 0 }]] },
+    "Trigger: Classification": { "main": [[{ "node": "Respond OK", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["voice", "stt", "mvp"]
+}
