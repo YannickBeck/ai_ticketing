@@ -18,6 +18,22 @@ param pgAdminLogin string
 @description('PostgreSQL administrator password')
 param pgAdminPassword string
 
+@secure()
+@description('PostgreSQL password for Zammad service account')
+param pgZammadPassword string
+
+@secure()
+@description('PostgreSQL password for n8n service account')
+param pgN8nPassword string
+
+@secure()
+@description('Zammad Rails secret token')
+param zammadSecretToken string
+
+@secure()
+@description('n8n data encryption key')
+param n8nEncryptionKey string
+
 // Resource Group
 resource rg 'Microsoft.Resources/resourceGroups@2022-09-01' = {
   name: 'rg-ai-ticketing-${env}'
@@ -41,6 +57,10 @@ module keyVault 'modules/keyVault.bicep' = {
   params: {
     location: location
     env: env
+    pgZammadPassword: pgZammadPassword
+    pgN8nPassword: pgN8nPassword
+    zammadSecretToken: zammadSecretToken
+    n8nEncryptionKey: n8nEncryptionKey
   }
 }
 
