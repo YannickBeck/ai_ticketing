@@ -1,0 +1,21 @@
+# Normalize line endings
+* text=auto eol=lf
+
+# Bicep
+*.bicep text eol=lf
+
+# SQL
+*.sql text eol=lf
+
+# JSON
+*.json text eol=lf
+
+# YAML
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Markdown
+*.md text eol=lf
+
+# Shell
+*.sh text eol=lf
