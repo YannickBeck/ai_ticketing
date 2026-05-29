@@ -1,0 +1,60 @@
+{
+  "name": "09 Feedback Loop",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "feedback", "responseMode": "responseNode" },
+      "name": "Webhook: Feedback",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "id": "webhook-feedback"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json;\n// Pflichtfelder prüfen\nif (!body.zammad_ticket_id || !body.draft_id || !body.user_id) {\n  throw new Error('Pflichtfelder fehlen: zammad_ticket_id, draft_id, user_id');\n}\nif (body.rating && (body.rating < 1 || body.rating > 5)) {\n  throw new Error('Rating muss zwischen 1 und 5 liegen');\n}\nreturn [{ json: body }];"
+      },
+      "name": "Validate Feedback",
+      "type": "n8n-nodes-base.code",
+      "position": [450, 300],
+      "id": "validate-feedback"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO feedback (zammad_ticket_id, draft_id, user_id, rating, correction_type, comment, draft_was_used, edit_extent)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8)\nRETURNING id",
+        "queryParams": "={{ $json.zammad_ticket_id }},={{ $json.draft_id }},={{ $json.user_id }},={{ $json.rating || null }},={{ $json.correction_type || null }},={{ $json.comment || null }},={{ $json.draft_was_used !== false }},={{ $json.edit_extent || 'none' }}"
+      },
+      "name": "DB: Save Feedback",
+      "type": "n8n-nodes-base.postgres",
+      "position": [650, 300],
+      "id": "save-feedback",
+      "credentials": { "postgres": { "id": "pg-ai-buddy", "name": "PostgreSQL AI Buddy" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE ai_draft SET status = CASE WHEN $1 = true AND $2 = 'none' THEN 'approved' WHEN $1 = true THEN 'edited' ELSE 'rejected' END, updated_at=NOW() WHERE id = $3",
+        "queryParams": "={{ $('Validate Feedback').item.json.draft_was_used !== false }},={{ $('Validate Feedback').item.json.edit_extent || 'none' }},={{ $('Validate Feedback').item.json.draft_id }}"
+      },
+      "name": "DB: Update Draft Status",
+      "type": "n8n-nodes-base.postgres",
+      "position": [850, 300],
+      "id": "update-draft",
+      "credentials": { "postgres": { "id": "pg-ai-buddy", "name": "PostgreSQL AI Buddy" } }
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ {\"status\": \"saved\", \"feedback_id\": $('DB: Save Feedback').item.json.id} }}" },
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1050, 300],
+      "id": "respond-ok"
+    }
+  ],
+  "connections": {
+    "Webhook: Feedback": { "main": [[{ "node": "Validate Feedback", "type": "main", "index": 0 }]] },
+    "Validate Feedback": { "main": [[{ "node": "DB: Save Feedback", "type": "main", "index": 0 }]] },
+    "DB: Save Feedback": { "main": [[{ "node": "DB: Update Draft Status", "type": "main", "index": 0 }]] },
+    "DB: Update Draft Status": { "main": [[{ "node": "Respond OK", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["feedback", "quality"]
+}
