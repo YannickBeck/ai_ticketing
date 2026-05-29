@@ -1,0 +1,63 @@
+{
+  "name": "07 Escalation",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "escalation", "responseMode": "lastNode" },
+      "name": "Webhook: Escalation",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "id": "webhook-escalation"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $env.ZAMMAD_BASE_URL }}/api/v1/tickets/={{ $json.zammad_ticket_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"group\": \"Eskalation\",\n  \"priority\": \"3 hoch\"\n}"
+      },
+      "name": "Zammad: Move to Escalation Group",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "id": "zammad-escalate",
+      "credentials": { "httpHeaderAuth": { "id": "zammad-api", "name": "Zammad API Token" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ZAMMAD_BASE_URL }}/api/v1/ticket_articles",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ticket_id\": {{ $('Webhook: Escalation').item.json.zammad_ticket_id }},\n  \"type\": \"note\",\n  \"sender\": \"System\",\n  \"internal\": true,\n  \"body\": \"🚨 **Eskalation ausgelöst**\\n\\n**Grund:** {{ $('Webhook: Escalation').item.json.reason }}\\n**Eskaliert durch:** {{ $('Webhook: Escalation').item.json.escalated_by || 'System' }}\\n**Zeitpunkt:** {{ new Date().toLocaleString('de-DE') }}\"\n}"
+      },
+      "name": "Zammad: Add Escalation Note",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [650, 300],
+      "id": "add-escalation-note",
+      "credentials": { "httpHeaderAuth": { "id": "zammad-api", "name": "Zammad API Token" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (actor_type, actor_id, action, entity_type, entity_id, metadata) VALUES ('system', 'escalation-workflow', 'ticket.escalated', 'ticket', $1::varchar, $2::jsonb)",
+        "queryParams": "={{ $('Webhook: Escalation').item.json.zammad_ticket_id }},={{ JSON.stringify({reason: $('Webhook: Escalation').item.json.reason, escalated_by: $('Webhook: Escalation').item.json.escalated_by}) }}"
+      },
+      "name": "DB: Audit Log",
+      "type": "n8n-nodes-base.postgres",
+      "position": [850, 300],
+      "id": "audit-log",
+      "credentials": { "postgres": { "id": "pg-ai-buddy", "name": "PostgreSQL AI Buddy" } }
+    }
+  ],
+  "connections": {
+    "Webhook: Escalation": { "main": [[{ "node": "Zammad: Move to Escalation Group", "type": "main", "index": 0 }]] },
+    "Zammad: Move to Escalation Group": { "main": [[{ "node": "Zammad: Add Escalation Note", "type": "main", "index": 0 }]] },
+    "Zammad: Add Escalation Note": { "main": [[{ "node": "DB: Audit Log", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["escalation", "mvp"]
+}
