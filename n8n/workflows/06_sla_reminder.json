@@ -1,0 +1,105 @@
+{
+  "name": "06 SLA Reminder",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 15 }] } },
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "id": "schedule-trigger"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.ZAMMAD_BASE_URL }}/api/v1/tickets/search?query=state:open&per_page=50",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "name": "Zammad: Get Open Tickets",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "id": "get-open-tickets",
+      "credentials": { "httpHeaderAuth": { "id": "zammad-api", "name": "Zammad API Token" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// SLA Prüfung: Tickets nach Fälligkeit filtern\nconst tickets = $input.first().json.assets?.Ticket || {};\nconst now = new Date();\nconst warning30min = new Date(now.getTime() + 30 * 60 * 1000); // 30 Min in der Zukunft\n\nconst results = [];\n\nfor (const [id, ticket] of Object.entries(tickets)) {\n  if (!ticket.escalation_at) continue;\n  const slaDate = new Date(ticket.escalation_at);\n  \n  let slaStatus = null;\n  if (slaDate <= now) slaStatus = 'overdue';\n  else if (slaDate <= warning30min) slaStatus = 'warning';\n  \n  if (slaStatus) {\n    results.push({ json: {\n      ticketId: ticket.id,\n      ticketNumber: ticket.number,\n      title: ticket.title,\n      assigneeId: ticket.owner_id,\n      slaDate: ticket.escalation_at,\n      slaStatus,\n      minutesUntilSla: Math.round((slaDate - now) / 60000)\n    }});\n  }\n}\n\nreturn results.length > 0 ? results : [{ json: { noAction: true } }];"
+      },
+      "name": "Check SLA Status",
+      "type": "n8n-nodes-base.code",
+      "position": [650, 300],
+      "id": "check-sla"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [{ "value1": "={{ $json.slaStatus }}", "value2": "overdue", "operation": "equals" }]
+        }
+      },
+      "name": "Is Overdue?",
+      "type": "n8n-nodes-base.if",
+      "position": [850, 300],
+      "id": "is-overdue"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_BASE_URL }}/webhook/escalation",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "zammad_ticket_id", "value": "={{ $json.ticketId }}" },
+            { "name": "reason", "value": "SLA überschritten" }
+          ]
+        }
+      },
+      "name": "Trigger: Escalation",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1050, 200],
+      "id": "trigger-escalation"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ZAMMAD_BASE_URL }}/api/v1/ticket_articles",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ticket_id\": {{ $json.ticketId }},\n  \"type\": \"note\",\n  \"sender\": \"System\",\n  \"internal\": true,\n  \"body\": \"⚠️ SLA-Erinnerung: Dieses Ticket läuft in {{ $json.minutesUntilSla }} Minuten aus! Bitte priorisieren.\"\n}"
+      },
+      "name": "Zammad: SLA Warning Note",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1050, 400],
+      "id": "sla-warning-note",
+      "credentials": { "httpHeaderAuth": { "id": "zammad-api", "name": "Zammad API Token" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (actor_type, actor_id, action, entity_type, entity_id, metadata) VALUES ('system', 'sla-checker', $1, 'ticket', $2::varchar, $3::jsonb)",
+        "queryParams": "={{ $json.slaStatus === 'overdue' ? 'sla.overdue' : 'sla.warning' }},={{ $json.ticketId }},={{ JSON.stringify({slaDate: $json.slaDate, minutesUntilSla: $json.minutesUntilSla}) }}"
+      },
+      "name": "DB: Audit Log SLA Event",
+      "type": "n8n-nodes-base.postgres",
+      "position": [1250, 300],
+      "id": "audit-sla",
+      "credentials": { "postgres": { "id": "pg-ai-buddy", "name": "PostgreSQL AI Buddy" } }
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": { "main": [[{ "node": "Zammad: Get Open Tickets", "type": "main", "index": 0 }]] },
+    "Zammad: Get Open Tickets": { "main": [[{ "node": "Check SLA Status", "type": "main", "index": 0 }]] },
+    "Check SLA Status": { "main": [[{ "node": "Is Overdue?", "type": "main", "index": 0 }]] },
+    "Is Overdue?": {
+      "main": [
+        [{ "node": "Trigger: Escalation", "type": "main", "index": 0 }],
+        [{ "node": "Zammad: SLA Warning Note", "type": "main", "index": 0 }]
+      ]
+    },
+    "Trigger: Escalation": { "main": [[{ "node": "DB: Audit Log SLA Event", "type": "main", "index": 0 }]] },
+    "Zammad: SLA Warning Note": { "main": [[{ "node": "DB: Audit Log SLA Event", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["sla", "automation", "mvp"]
+}
