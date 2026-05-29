@@ -1,0 +1,46 @@
+name: Export n8n Workflows
+
+on:
+  schedule:
+    - cron: '0 2 * * *'   # Täglich 02:00 UTC
+  workflow_dispatch:
+
+jobs:
+  export:
+    name: Export and commit n8n workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Export all workflows via n8n API
+        run: |
+          mkdir -p n8n/workflows/exports
+
+          # Alle Workflow-IDs abrufen
+          WORKFLOW_IDS=$(curl -s \
+            -H "X-N8N-API-KEY: ${{ secrets.N8N_API_KEY }}" \
+            "${{ secrets.N8N_BASE_URL }}/api/v1/workflows" \
+            | jq -r '.data[].id')
+
+          # Jeden Workflow einzeln exportieren
+          for ID in $WORKFLOW_IDS; do
+            NAME=$(curl -s \
+              -H "X-N8N-API-KEY: ${{ secrets.N8N_API_KEY }}" \
+              "${{ secrets.N8N_BASE_URL }}/api/v1/workflows/$ID" \
+              | jq -r '.name | gsub(" "; "_") | ascii_downcase')
+
+            curl -s \
+              -H "X-N8N-API-KEY: ${{ secrets.N8N_API_KEY }}" \
+              "${{ secrets.N8N_BASE_URL }}/api/v1/workflows/$ID" \
+              > "n8n/workflows/exports/${NAME}.json"
+
+            echo "Exported: ${NAME}.json"
+          done
+
+      - name: Commit exported workflows
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: auto-export n8n workflows [$(date +%Y-%m-%d)]"
+          file_pattern: "n8n/workflows/exports/*.json"
