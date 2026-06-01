@@ -10,6 +10,7 @@ param logAnalyticsWorkspaceId string
 param logAnalyticsWorkspaceKey string
 param pgHost string
 param keyVaultName string
+param managedIdentityId string
 
 // ─── Container Apps Environment ───────────────────────────────
 
@@ -30,25 +31,6 @@ resource caEnv 'Microsoft.App/managedEnvironments@2023-05-01' = {
         workloadProfileType: 'Consumption'
       }
     ]
-  }
-}
-
-// ─── Managed Identity für alle Container Apps ─────────────────
-// Erlaubt Key Vault Zugriff ohne Credentials im Container
-
-resource caIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
-  name: 'id-ai-ticketing-${env}'
-  location: location
-}
-
-// Key Vault Secrets User Rolle für die Managed Identity
-resource kvRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(caIdentity.id, 'Key Vault Secrets User')
-  scope: resourceGroup()
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')  // Key Vault Secrets User
-    principalId: caIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
   }
 }
 
@@ -133,7 +115,7 @@ resource zammadApp 'Microsoft.App/containerApps@2023-05-01' = {
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
-      '${caIdentity.id}': {}
+      '${managedIdentityId}': {}
     }
   }
   dependsOn: [redisApp, elasticsearchApp]
@@ -152,12 +134,12 @@ resource zammadApp 'Microsoft.App/containerApps@2023-05-01' = {
         {
           name: 'pg-zammad-password'
           keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/pg-zammad-password'
-          identity: caIdentity.id
+          identity: managedIdentityId
         }
         {
           name: 'zammad-secret-token'
           keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/zammad-secret-token'
-          identity: caIdentity.id
+          identity: managedIdentityId
         }
       ]
     }
@@ -170,7 +152,7 @@ resource zammadApp 'Microsoft.App/containerApps@2023-05-01' = {
             { name: 'POSTGRESQL_HOST', value: pgHost }
             { name: 'POSTGRESQL_PORT', value: '5432' }
             { name: 'POSTGRESQL_DB', value: 'zammad' }
-            { name: 'POSTGRESQL_USER', value: 'pgadmin' }
+            { name: 'POSTGRESQL_USER', value: 'zammad_user' }
             { name: 'POSTGRESQL_PASS', secretRef: 'pg-zammad-password' }
             { name: 'POSTGRESQL_OPTIONS', value: 'sslmode=require' }
             { name: 'REDIS_URL', value: 'redis://ca-redis-${env}:6379' }
@@ -203,7 +185,7 @@ resource n8nApp 'Microsoft.App/containerApps@2023-05-01' = {
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
-      '${caIdentity.id}': {}
+      '${managedIdentityId}': {}
     }
   }
   properties: {
@@ -218,12 +200,12 @@ resource n8nApp 'Microsoft.App/containerApps@2023-05-01' = {
         {
           name: 'n8n-encryption-key'
           keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/n8n-encryption-key'
-          identity: caIdentity.id
+          identity: managedIdentityId
         }
         {
           name: 'pg-n8n-password'
           keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/pg-n8n-password'
-          identity: caIdentity.id
+          identity: managedIdentityId
         }
       ]
     }
@@ -242,7 +224,7 @@ resource n8nApp 'Microsoft.App/containerApps@2023-05-01' = {
             { name: 'DB_POSTGRESDB_HOST', value: pgHost }
             { name: 'DB_POSTGRESDB_PORT', value: '5432' }
             { name: 'DB_POSTGRESDB_DATABASE', value: 'n8n' }
-            { name: 'DB_POSTGRESDB_USER', value: 'pgadmin' }
+            { name: 'DB_POSTGRESDB_USER', value: 'n8n_user' }
             { name: 'DB_POSTGRESDB_PASSWORD', secretRef: 'pg-n8n-password' }
             { name: 'DB_POSTGRESDB_SSL_ENABLED', value: 'true' }
             // Execution Logs speichern
@@ -273,4 +255,3 @@ resource n8nApp 'Microsoft.App/containerApps@2023-05-01' = {
 output n8nUrl string = 'https://${n8nApp.properties.configuration.ingress.fqdn}'
 output zammadUrl string = 'https://${zammadApp.properties.configuration.ingress.fqdn}'
 output caEnvId string = caEnv.id
-output managedIdentityId string = caIdentity.id

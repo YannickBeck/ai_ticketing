@@ -40,6 +40,16 @@ resource rg 'Microsoft.Resources/resourceGroups@2022-09-01' = {
   location: location
 }
 
+// Managed Identity (muss vor postgres + containerApps existieren)
+module identity 'modules/identity.bicep' = {
+  name: 'identity'
+  scope: rg
+  params: {
+    location: location
+    env: env
+  }
+}
+
 // Log Analytics Workspace (needed by App Insights + Container Apps)
 module logAnalytics 'modules/monitoring.bicep' = {
   name: 'monitoring'
@@ -64,7 +74,7 @@ module keyVault 'modules/keyVault.bicep' = {
   }
 }
 
-// PostgreSQL Flexible Server
+// PostgreSQL Flexible Server + DB-User Deployment Script
 module postgres 'modules/postgres.bicep' = {
   name: 'postgres'
   scope: rg
@@ -73,6 +83,8 @@ module postgres 'modules/postgres.bicep' = {
     env: env
     adminLogin: pgAdminLogin
     adminPassword: pgAdminPassword
+    pgN8nPassword: pgN8nPassword
+    pgZammadPassword: pgZammadPassword
   }
 }
 
@@ -106,9 +118,11 @@ module speech 'modules/speech.bicep' = {
 }
 
 // Container Apps Environment + n8n + Zammad + Redis + Elasticsearch
+// dependsOn postgres stellt sicher dass DB-User existieren bevor Container starten
 module containerApps 'modules/containerApps.bicep' = {
   name: 'containerApps'
   scope: rg
+  dependsOn: [postgres]
   params: {
     location: location
     env: env
@@ -116,6 +130,7 @@ module containerApps 'modules/containerApps.bicep' = {
     logAnalyticsWorkspaceKey: logAnalytics.outputs.workspaceKey
     pgHost: postgres.outputs.pgHost
     keyVaultName: keyVault.outputs.keyVaultName
+    managedIdentityId: identity.outputs.identityId
   }
 }
 
