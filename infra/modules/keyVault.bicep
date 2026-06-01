@@ -5,6 +5,18 @@
 param location string
 param env string
 
+@secure()
+param pgZammadPassword string
+
+@secure()
+param pgN8nPassword string
+
+@secure()
+param zammadSecretToken string
+
+@secure()
+param n8nEncryptionKey string
+
 resource keyVault 'Microsoft.KeyVault/vaults@2023-02-01' = {
   name: 'kv-aiticketing-${env}'  // max 24 Zeichen
   location: location
@@ -26,8 +38,29 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-02-01' = {
   }
 }
 
-// Ausgabe: Container Apps managed identity erhält Key Vault Secrets User Rolle
-// (wird in containerApps.bicep via roleAssignment gesetzt)
+resource secretPgZammad 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
+  parent: keyVault
+  name: 'pg-zammad-password'
+  properties: { value: pgZammadPassword }
+}
+
+resource secretPgN8n 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
+  parent: keyVault
+  name: 'pg-n8n-password'
+  properties: { value: pgN8nPassword }
+}
+
+resource secretZammadToken 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
+  parent: keyVault
+  name: 'zammad-secret-token'
+  properties: { value: zammadSecretToken }
+}
+
+resource secretN8nKey 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
+  parent: keyVault
+  name: 'n8n-encryption-key'
+  properties: { value: n8nEncryptionKey }
+}
 
 output keyVaultName string = keyVault.name
 output keyVaultUri string = keyVault.properties.vaultUri

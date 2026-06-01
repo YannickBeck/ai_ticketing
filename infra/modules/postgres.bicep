@@ -13,6 +13,14 @@ param adminLogin string
 @description('PostgreSQL admin password')
 param adminPassword string
 
+@secure()
+@description('Password for n8n service account')
+param pgN8nPassword string
+
+@secure()
+@description('Password for Zammad service account')
+param pgZammadPassword string
+
 resource pgServer 'Microsoft.DBforPostgreSQL/flexibleServers@2022-12-01' = {
   name: 'pg-ai-ticketing-${env}'
   location: location
@@ -93,3 +101,71 @@ resource dbAiBuddy 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2022-12-
 
 output pgHost string = pgServer.properties.fullyQualifiedDomainName
 output pgServerId string = pgServer.id
+
+// ─── Deployment Script: Erstellt dedizierte DB-User ───────────
+// Separate Identity mit Contributor-Rolle, damit das Script seine
+// Outputs in den automatisch erzeugten Storage Account schreiben kann.
+
+resource scriptIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'id-deploy-script-${env}'
+  location: location
+}
+
+resource scriptContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(scriptIdentity.id, 'Contributor', resourceGroup().id)
+  scope: resourceGroup()
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c') // Contributor
+    principalId: scriptIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource createDbUsers 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
+  name: 'create-db-users-${env}'
+  location: location
+  kind: 'AzureCLI'
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${scriptIdentity.id}': {}
+    }
+  }
+  properties: {
+    azCliVersion: '2.52.0'
+    retentionInterval: 'P1D'
+    cleanupPreference: 'OnSuccess'
+    forceUpdateTag: 'v2'
+    environmentVariables: [
+      { name: 'PG_HOST', value: pgServer.properties.fullyQualifiedDomainName }
+      { name: 'PG_ADMIN_USER', value: adminLogin }
+      { name: 'PG_ADMIN_PASSWORD', secureValue: adminPassword }
+      { name: 'PG_N8N_PASSWORD', secureValue: pgN8nPassword }
+      { name: 'PG_ZAMMAD_PASSWORD', secureValue: pgZammadPassword }
+    ]
+    scriptContent: '''
+      #!/bin/bash
+      set -e
+      apk add --no-cache postgresql-client 2>&1
+
+      run_sql() {
+        PGPASSWORD="$PG_ADMIN_PASSWORD" psql -h "$PG_HOST" -U "$PG_ADMIN_USER" -d "$1" -c "$2"
+      }
+
+      run_sql postgres "CREATE USER n8n_user WITH PASSWORD '$PG_N8N_PASSWORD';" 2>/dev/null || \
+        run_sql postgres "ALTER USER n8n_user WITH PASSWORD '$PG_N8N_PASSWORD';"
+      run_sql postgres "GRANT ALL PRIVILEGES ON DATABASE n8n TO n8n_user;"
+      run_sql n8n     "GRANT ALL ON SCHEMA public TO n8n_user;"
+
+      run_sql postgres "CREATE USER zammad_user WITH PASSWORD '$PG_ZAMMAD_PASSWORD';" 2>/dev/null || \
+        run_sql postgres "ALTER USER zammad_user WITH PASSWORD '$PG_ZAMMAD_PASSWORD';"
+      run_sql postgres "ALTER USER zammad_user CREATEDB;"
+      run_sql postgres "GRANT ALL PRIVILEGES ON DATABASE zammad TO zammad_user;"
+      run_sql zammad  "GRANT ALL ON SCHEMA public TO zammad_user;"
+
+      echo "DB users provisioned"
+    '''
+  }
+  // pgVectorExtension listed here to prevent ServerIsBusy conflicts — ARM runs config updates and scripts in parallel otherwise
+  dependsOn: [dbN8n, dbZammad, scriptContributorRole, pgVectorExtension]
+}

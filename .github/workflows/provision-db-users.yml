@@ -1,0 +1,34 @@
+name: Provision DB Users
+
+on:
+  workflow_dispatch:
+
+jobs:
+  provision:
+    name: Grant DB privileges
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Install PostgreSQL client
+        run: sudo apt-get install -y postgresql-client
+
+      - name: Grant CREATEDB to zammad_user + ensure schema grants
+        env:
+          PGPASSWORD: ${{ secrets.PG_ADMIN_PASSWORD }}
+          PG_HOST: pg-ai-ticketing-prod.postgres.database.azure.com
+        run: |
+          run_sql() {
+            psql -h "$PG_HOST" -U pgadmin -d "$1" -c "$2"
+          }
+
+          echo "=== Ensuring n8n_user privileges ==="
+          run_sql postgres "GRANT ALL PRIVILEGES ON DATABASE n8n TO n8n_user;"
+          run_sql n8n     "GRANT ALL ON SCHEMA public TO n8n_user;"
+
+          echo "=== Ensuring zammad_user privileges ==="
+          run_sql postgres "ALTER USER zammad_user CREATEDB;"
+          run_sql postgres "GRANT ALL PRIVILEGES ON DATABASE zammad TO zammad_user;"
+          run_sql zammad  "GRANT ALL ON SCHEMA public TO zammad_user;"
+
+          echo "=== Verification ==="
+          run_sql postgres "SELECT usename, usecreatedb FROM pg_user WHERE usename IN ('n8n_user','zammad_user');"
