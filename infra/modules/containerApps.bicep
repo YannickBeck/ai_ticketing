@@ -165,7 +165,7 @@ resource zammadApp 'Microsoft.App/containerApps@2023-05-01' = {
         {
           name: 'zammad-init'
           image: zammadImage
-          command: ['/bin/sh', '-c', 'zammad run init']
+          args: ['zammad', 'run', 'init']
           env: zammadEnv
           resources: { cpu: json('0.5'), memory: '1Gi' }
         }
@@ -174,7 +174,7 @@ resource zammadApp 'Microsoft.App/containerApps@2023-05-01' = {
         {
           name: 'zammad-railsserver'
           image: zammadImage
-          command: ['/bin/sh', '-c', 'zammad run railsserver']
+          args: ['zammad', 'run', 'railsserver']
           env: union(zammadEnv, [{ name: 'ZAMMAD_RAILSSERVER_PORT', value: '3000' }])
           resources: { cpu: json('1.0'), memory: '2Gi' }
         }
@@ -203,7 +203,7 @@ resource zammadSchedulerApp 'Microsoft.App/containerApps@2023-05-01' = {
         {
           name: 'zammad-scheduler'
           image: zammadImage
-          command: ['/bin/sh', '-c', 'zammad run scheduler']
+          args: ['zammad', 'run', 'scheduler']
           env: zammadEnv
           resources: { cpu: json('0.5'), memory: '1Gi' }
         }
@@ -237,7 +237,7 @@ resource zammadWebsocketApp 'Microsoft.App/containerApps@2023-05-01' = {
         {
           name: 'zammad-websocket'
           image: zammadImage
-          command: ['/bin/sh', '-c', 'zammad run websocket']
+          args: ['zammad', 'run', 'websocket']
           env: zammadEnv
           resources: { cpu: json('0.5'), memory: '1Gi' }
         }
