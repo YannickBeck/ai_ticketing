@@ -37,8 +37,11 @@ resource caEnv 'Microsoft.App/managedEnvironments@2023-05-01' = {
 // Redis läuft als Sidecar im Zammad-Pod (localhost:6379).
 // Separate TCP-Ingress in ACA Consumption-Environments ist nicht zuverlässig.
 
-// ─── Elasticsearch (Zammad Volltext-Suche) ───────────────────
-
+// ─── Elasticsearch (separate App — nicht mehr aktiv genutzt) ─────────────────
+// Elasticsearch läuft seit Rev. 19 als Sidecar im Zammad-Pod (localhost:9200).
+// ACA Envoy-Proxy (port 80) verfälscht PUT/POST-Bodies → sidecar umgeht das.
+// Diese separate App kann nach dem nächsten Full-Deploy entfernt werden.
+// Behalte sie vorerst damit alte Revisions nicht crashen, falls sie noch laufen.
 resource elasticsearchApp 'Microsoft.App/containerApps@2023-05-01' = {
   name: 'ca-elasticsearch-${env}'
   location: location
@@ -55,7 +58,7 @@ resource elasticsearchApp 'Microsoft.App/containerApps@2023-05-01' = {
       containers: [
         {
           name: 'elasticsearch'
-          image: 'docker.elastic.co/elasticsearch/elasticsearch:8.11.0'
+          image: 'docker.elastic.co/elasticsearch/elasticsearch:7.17.22'
           env: [
             { name: 'discovery.type', value: 'single-node' }
             { name: 'xpack.security.enabled', value: 'false' }
@@ -75,11 +78,14 @@ resource elasticsearchApp 'Microsoft.App/containerApps@2023-05-01' = {
   }
 }
 
-// ─── Zammad (3 Prozesse: railsserver + scheduler + websocket) ────
-// ghcr.io/zammad/zammad:6.3.0 benötigt expliziten Command pro Prozess.
-// Init-Container läuft DB-Migrations idempotent vor dem railsserver.
+// ─── Zammad (4 Container: railsserver + scheduler + websocket + ES-sidecar) ──
+// Zammad 6.5.4 + Elasticsearch 7.17.22 als Sidecar (localhost:9200).
+// ES als Sidecar notwendig: ACA Envoy-Proxy (internes HTTP) verfälscht PUT/POST-Bodies
+// und lässt Felder als URL-Query-Parameter bei ES ankommen → Index-Erstellung schlägt fehl.
+// Redis läuft ebenfalls als Sidecar im Zammad-Pod (localhost:6379).
+// maxReplicas:1 wegen shared in-Pod State (Redis + ES).
 
-var zammadImage = 'ghcr.io/zammad/zammad:6.3.0'
+var zammadImage = 'ghcr.io/zammad/zammad:6.5.4'
 
 var zammadSecrets = [
   {
@@ -103,16 +109,17 @@ var zammadEnv = [
   // POSTGRESQL_OPTIONS intentionally omitted — Zammad 6.x appends it directly to the DB name string
   // Redis läuft als Sidecar im selben Pod → localhost
   { name: 'REDIS_URL', value: 'redis://localhost:6379' }
-  { name: 'ELASTICSEARCH_HOST', value: 'ca-elasticsearch-${env}.internal.${caEnv.properties.defaultDomain}' }
+  // Elasticsearch läuft als Sidecar → localhost:9200 (direkt, kein Envoy-Proxy)
+  { name: 'ELASTICSEARCH_HOST', value: 'localhost' }
   { name: 'ELASTICSEARCH_PORT', value: '9200' }
   { name: 'ELASTICSEARCH_SSL', value: 'false' }
   { name: 'ZAMMAD_SECRET_TOKEN', secretRef: 'zammad-secret-token' }
   { name: 'RAILS_ENV', value: 'production' }
 ]
 
-// Zammad — alle Prozesse + Redis-Sidecar in einem Pod
-// Railsserver (3000) + Scheduler + WebSocket + Redis (localhost:6379)
-// maxReplicas:1 wegen shared in-Pod Redis.
+// Zammad — alle Prozesse + Redis-Sidecar + ES-Sidecar in einem Pod
+// Railsserver (3000) + Scheduler + WebSocket + Redis (localhost:6379) + ES (localhost:9200)
+// maxReplicas:1 wegen shared in-Pod State (Redis + ES).
 resource zammadApp 'Microsoft.App/containerApps@2023-05-01' = {
   name: 'ca-zammad-${env}'
   location: location
@@ -133,19 +140,37 @@ resource zammadApp 'Microsoft.App/containerApps@2023-05-01' = {
       secrets: zammadSecrets
     }
     template: {
-      // No init containers — init runs inline in railsserver before Puma starts
       containers: [
         {
           name: 'redis-sidecar'
           image: 'redis:7-alpine'
-          // No --appendonly: YAML would parse 'yes' as boolean True, breaking Redis
+          // No --appendonly: YAML würde 'yes' als boolean True parsen → Redis Fehler
+          args: ['redis-server']
           resources: { cpu: json('0.25'), memory: '0.5Gi' }
         }
         {
+          // Elasticsearch als Sidecar — umgeht ACA Envoy-Proxy der PUT/POST-Bodies verfälscht.
+          // ingest-attachment Plugin wird beim Start installiert (für Attachment-Volltext-Suche).
+          name: 'elasticsearch-sidecar'
+          image: 'docker.elastic.co/elasticsearch/elasticsearch:7.17.22'
+          command: ['/bin/bash', '-c']
+          args: ['elasticsearch-plugin install --batch ingest-attachment; /usr/local/bin/docker-entrypoint.sh eswrapper']
+          env: [
+            { name: 'discovery.type', value: 'single-node' }
+            { name: 'xpack.security.enabled', value: 'false' }
+            { name: 'ES_JAVA_OPTS', value: '-Xms512m -Xmx512m' }
+          ]
+          resources: { cpu: json('0.5'), memory: '1Gi' }
+        }
+        {
+          // zammad-init läuft vor Puma: db:create wird via sed übersprungen
+          // (zammad_user hat kein CREATEDB-Recht — DB wurde bereits durch postgres.bicep angelegt).
           name: 'zammad-railsserver'
           image: zammadImage
           command: ['/bin/bash', '-c']
-          args: ['sleep 10 && /docker-entrypoint.sh zammad-init && exec /docker-entrypoint.sh zammad-railsserver']
+          args: [
+            'sleep 10 && sed -e \'s/.*db:create.*//\' /docker-entrypoint.sh > /tmp/ep.sh && chmod +x /tmp/ep.sh && /tmp/ep.sh zammad-init && exec /docker-entrypoint.sh zammad-railsserver'
+          ]
           env: union(zammadEnv, [{ name: 'ZAMMAD_RAILSSERVER_PORT', value: '3000' }])
           resources: { cpu: json('1.0'), memory: '2Gi' }
           probes: [
