@@ -106,17 +106,47 @@ resource elasticsearchApp 'Microsoft.App/containerApps@2023-05-01' = {
   }
 }
 
-// ─── Zammad (Rails App + WebSocket + Scheduler) ───────────────
-// Zammad benötigt mehrere Prozesse — hier als Hauptapp
+// ─── Zammad (3 Prozesse: railsserver + scheduler + websocket) ────
+// ghcr.io/zammad/zammad:6.3.0 benötigt expliziten Command pro Prozess.
+// Init-Container läuft DB-Migrations idempotent vor dem railsserver.
 
+var zammadImage = 'ghcr.io/zammad/zammad:6.3.0'
+
+var zammadSecrets = [
+  {
+    name: 'pg-zammad-password'
+    keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/pg-zammad-password'
+    identity: managedIdentityId
+  }
+  {
+    name: 'zammad-secret-token'
+    keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/zammad-secret-token'
+    identity: managedIdentityId
+  }
+]
+
+var zammadEnv = [
+  { name: 'POSTGRESQL_HOST', value: pgHost }
+  { name: 'POSTGRESQL_PORT', value: '5432' }
+  { name: 'POSTGRESQL_DB', value: 'zammad' }
+  { name: 'POSTGRESQL_USER', value: 'zammad_user' }
+  { name: 'POSTGRESQL_PASS', secretRef: 'pg-zammad-password' }
+  { name: 'POSTGRESQL_OPTIONS', value: 'sslmode=require' }
+  { name: 'REDIS_URL', value: 'redis://ca-redis-${env}:6379' }
+  { name: 'ELASTICSEARCH_HOST', value: 'ca-elasticsearch-${env}' }
+  { name: 'ELASTICSEARCH_PORT', value: '9200' }
+  { name: 'ELASTICSEARCH_SSL', value: 'false' }
+  { name: 'ZAMMAD_SECRET_TOKEN', secretRef: 'zammad-secret-token' }
+  { name: 'RAILS_ENV', value: 'production' }
+]
+
+// Railsserver — öffentlich erreichbar, läuft DB-Init vor dem Start
 resource zammadApp 'Microsoft.App/containerApps@2023-05-01' = {
   name: 'ca-zammad-${env}'
   location: location
   identity: {
     type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${managedIdentityId}': {}
-    }
+    userAssignedIdentities: { '${managedIdentityId}': {} }
   }
   dependsOn: [redisApp, elasticsearchApp]
   properties: {
@@ -126,53 +156,93 @@ resource zammadApp 'Microsoft.App/containerApps@2023-05-01' = {
         external: true
         targetPort: 3000
         transport: 'http'
-        corsPolicy: {
-          allowedOrigins: ['*']
-        }
+        corsPolicy: { allowedOrigins: ['*'] }
       }
-      secrets: [
+      secrets: zammadSecrets
+    }
+    template: {
+      initContainers: [
         {
-          name: 'pg-zammad-password'
-          keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/pg-zammad-password'
-          identity: managedIdentityId
-        }
-        {
-          name: 'zammad-secret-token'
-          keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/zammad-secret-token'
-          identity: managedIdentityId
+          name: 'zammad-init'
+          image: zammadImage
+          command: ['zammad', 'run', 'init']
+          env: zammadEnv
+          resources: { cpu: json('0.5'), memory: '1Gi' }
         }
       ]
+      containers: [
+        {
+          name: 'zammad-railsserver'
+          image: zammadImage
+          command: ['zammad', 'run', 'railsserver']
+          env: union(zammadEnv, [{ name: 'ZAMMAD_RAILSSERVER_PORT', value: '3000' }])
+          resources: { cpu: json('1.0'), memory: '2Gi' }
+        }
+      ]
+      scale: { minReplicas: 1, maxReplicas: 2 }
+    }
+  }
+}
+
+// Scheduler — Hintergrund-Jobs (keine Ingress nötig)
+resource zammadSchedulerApp 'Microsoft.App/containerApps@2023-05-01' = {
+  name: 'ca-zammad-scheduler-${env}'
+  location: location
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: { '${managedIdentityId}': {} }
+  }
+  dependsOn: [zammadApp]
+  properties: {
+    managedEnvironmentId: caEnv.id
+    configuration: {
+      secrets: zammadSecrets
     }
     template: {
       containers: [
         {
-          name: 'zammad-railsserver'
-          image: 'ghcr.io/zammad/zammad:6.3.0'
-          env: [
-            { name: 'POSTGRESQL_HOST', value: pgHost }
-            { name: 'POSTGRESQL_PORT', value: '5432' }
-            { name: 'POSTGRESQL_DB', value: 'zammad' }
-            { name: 'POSTGRESQL_USER', value: 'zammad_user' }
-            { name: 'POSTGRESQL_PASS', secretRef: 'pg-zammad-password' }
-            { name: 'POSTGRESQL_OPTIONS', value: 'sslmode=require' }
-            { name: 'REDIS_URL', value: 'redis://ca-redis-${env}:6379' }
-            { name: 'ELASTICSEARCH_HOST', value: 'ca-elasticsearch-${env}' }
-            { name: 'ELASTICSEARCH_PORT', value: '9200' }
-            { name: 'ELASTICSEARCH_SSL', value: 'false' }
-            { name: 'ZAMMAD_SECRET_TOKEN', secretRef: 'zammad-secret-token' }
-            { name: 'ZAMMAD_RAILSSERVER_PORT', value: '3000' }
-            { name: 'RAILS_ENV', value: 'production' }
-          ]
-          resources: {
-            cpu: json('1.0')
-            memory: '2Gi'
-          }
+          name: 'zammad-scheduler'
+          image: zammadImage
+          command: ['zammad', 'run', 'scheduler']
+          env: zammadEnv
+          resources: { cpu: json('0.5'), memory: '1Gi' }
         }
       ]
-      scale: {
-        minReplicas: 1
-        maxReplicas: 2
+      scale: { minReplicas: 1, maxReplicas: 1 }
+    }
+  }
+}
+
+// WebSocket-Server — intern erreichbar über Port 6042
+resource zammadWebsocketApp 'Microsoft.App/containerApps@2023-05-01' = {
+  name: 'ca-zammad-websocket-${env}'
+  location: location
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: { '${managedIdentityId}': {} }
+  }
+  dependsOn: [zammadApp]
+  properties: {
+    managedEnvironmentId: caEnv.id
+    configuration: {
+      ingress: {
+        external: false
+        targetPort: 6042
+        transport: 'http'
       }
+      secrets: zammadSecrets
+    }
+    template: {
+      containers: [
+        {
+          name: 'zammad-websocket'
+          image: zammadImage
+          command: ['zammad', 'run', 'websocket']
+          env: zammadEnv
+          resources: { cpu: json('0.5'), memory: '1Gi' }
+        }
+      ]
+      scale: { minReplicas: 1, maxReplicas: 1 }
     }
   }
 }
