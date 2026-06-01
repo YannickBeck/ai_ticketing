@@ -171,7 +171,11 @@ resource zammadApp 'Microsoft.App/containerApps@2023-05-01' = {
           args: [
             'sleep 10 && sed -e \'s/.*db:create.*//\' /docker-entrypoint.sh > /tmp/ep.sh && chmod +x /tmp/ep.sh && /tmp/ep.sh zammad-init && exec /docker-entrypoint.sh zammad-railsserver'
           ]
-          env: union(zammadEnv, [{ name: 'ZAMMAD_RAILSSERVER_PORT', value: '3000' }])
+          env: union(zammadEnv, [
+            { name: 'ZAMMAD_RAILSSERVER_PORT', value: '3000' }
+            // Puma läuft ohne nginx davor — statische Assets (JS/CSS) direkt via Rack ausliefern
+            { name: 'RAILS_SERVE_STATIC_FILES', value: 'true' }
+          ])
           resources: { cpu: json('1.0'), memory: '2Gi' }
           probes: [
             {
