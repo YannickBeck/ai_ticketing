@@ -34,39 +34,8 @@ resource caEnv 'Microsoft.App/managedEnvironments@2023-05-01' = {
   }
 }
 
-// ─── Redis (Zammad benötigt Redis für Sessions/Jobs) ──────────
-
-resource redisApp 'Microsoft.App/containerApps@2023-05-01' = {
-  name: 'ca-redis-${env}'
-  location: location
-  properties: {
-    managedEnvironmentId: caEnv.id
-    configuration: {
-      ingress: {
-        external: false
-        targetPort: 6379
-        transport: 'tcp'
-      }
-    }
-    template: {
-      containers: [
-        {
-          name: 'redis'
-          image: 'redis:7-alpine'
-          resources: {
-            cpu: json('0.25')
-            memory: '0.5Gi'
-          }
-          args: ['redis-server', '--appendonly', 'yes']
-        }
-      ]
-      scale: {
-        minReplicas: 1
-        maxReplicas: 1
-      }
-    }
-  }
-}
+// Redis läuft als Sidecar im Zammad-Pod (localhost:6379).
+// Separate TCP-Ingress in ACA Consumption-Environments ist nicht zuverlässig.
 
 // ─── Elasticsearch (Zammad Volltext-Suche) ───────────────────
 
@@ -131,16 +100,19 @@ var zammadEnv = [
   { name: 'POSTGRESQL_DB', value: 'zammad' }
   { name: 'POSTGRESQL_USER', value: 'zammad_user' }
   { name: 'POSTGRESQL_PASS', secretRef: 'pg-zammad-password' }
-  { name: 'POSTGRESQL_OPTIONS', value: 'sslmode=require' }
-  { name: 'REDIS_URL', value: 'redis://ca-redis-${env}:6379' }
-  { name: 'ELASTICSEARCH_HOST', value: 'ca-elasticsearch-${env}' }
+  // POSTGRESQL_OPTIONS intentionally omitted — Zammad 6.x appends it directly to the DB name string
+  // Redis läuft als Sidecar im selben Pod → localhost
+  { name: 'REDIS_URL', value: 'redis://localhost:6379' }
+  { name: 'ELASTICSEARCH_HOST', value: 'ca-elasticsearch-${env}.internal.${caEnv.properties.defaultDomain}' }
   { name: 'ELASTICSEARCH_PORT', value: '9200' }
   { name: 'ELASTICSEARCH_SSL', value: 'false' }
   { name: 'ZAMMAD_SECRET_TOKEN', secretRef: 'zammad-secret-token' }
   { name: 'RAILS_ENV', value: 'production' }
 ]
 
-// Railsserver — öffentlich erreichbar, läuft DB-Init vor dem Start
+// Zammad — alle Prozesse + Redis-Sidecar in einem Pod
+// Railsserver (3000) + Scheduler + WebSocket + Redis (localhost:6379)
+// maxReplicas:1 wegen shared in-Pod Redis.
 resource zammadApp 'Microsoft.App/containerApps@2023-05-01' = {
   name: 'ca-zammad-${env}'
   location: location
@@ -148,7 +120,7 @@ resource zammadApp 'Microsoft.App/containerApps@2023-05-01' = {
     type: 'UserAssigned'
     userAssignedIdentities: { '${managedIdentityId}': {} }
   }
-  dependsOn: [redisApp, elasticsearchApp]
+  dependsOn: [elasticsearchApp]
   properties: {
     managedEnvironmentId: caEnv.id
     configuration: {
@@ -161,83 +133,44 @@ resource zammadApp 'Microsoft.App/containerApps@2023-05-01' = {
       secrets: zammadSecrets
     }
     template: {
-      initContainers: [
-        {
-          name: 'zammad-init'
-          image: zammadImage
-          args: ['zammad-init']
-          env: zammadEnv
-          resources: { cpu: json('0.5'), memory: '1Gi' }
-        }
-      ]
+      // No init containers — init runs inline in railsserver before Puma starts
       containers: [
+        {
+          name: 'redis-sidecar'
+          image: 'redis:7-alpine'
+          // No --appendonly: YAML would parse 'yes' as boolean True, breaking Redis
+          resources: { cpu: json('0.25'), memory: '0.5Gi' }
+        }
         {
           name: 'zammad-railsserver'
           image: zammadImage
-          args: ['zammad-railsserver']
+          command: ['/bin/bash', '-c']
+          args: ['sleep 10 && /docker-entrypoint.sh zammad-init && exec /docker-entrypoint.sh zammad-railsserver']
           env: union(zammadEnv, [{ name: 'ZAMMAD_RAILSSERVER_PORT', value: '3000' }])
           resources: { cpu: json('1.0'), memory: '2Gi' }
+          probes: [
+            {
+              type: 'Startup'
+              tcpSocket: { port: 3000 }
+              initialDelaySeconds: 60
+              periodSeconds: 10
+              failureThreshold: 120
+            }
+          ]
         }
-      ]
-      scale: { minReplicas: 1, maxReplicas: 2 }
-    }
-  }
-}
-
-// Scheduler — Hintergrund-Jobs (keine Ingress nötig)
-resource zammadSchedulerApp 'Microsoft.App/containerApps@2023-05-01' = {
-  name: 'ca-zammad-scheduler-${env}'
-  location: location
-  identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: { '${managedIdentityId}': {} }
-  }
-  dependsOn: [zammadApp]
-  properties: {
-    managedEnvironmentId: caEnv.id
-    configuration: {
-      secrets: zammadSecrets
-    }
-    template: {
-      containers: [
         {
           name: 'zammad-scheduler'
           image: zammadImage
-          args: ['zammad-scheduler']
+          command: ['/bin/bash', '-c']
+          args: ['until (echo >/dev/tcp/localhost/3000) 2>/dev/null; do sleep 5; done && exec /docker-entrypoint.sh zammad-scheduler']
           env: zammadEnv
           resources: { cpu: json('0.5'), memory: '1Gi' }
         }
-      ]
-      scale: { minReplicas: 1, maxReplicas: 1 }
-    }
-  }
-}
-
-// WebSocket-Server — intern erreichbar über Port 6042
-resource zammadWebsocketApp 'Microsoft.App/containerApps@2023-05-01' = {
-  name: 'ca-zammad-websocket-${env}'
-  location: location
-  identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: { '${managedIdentityId}': {} }
-  }
-  dependsOn: [zammadApp]
-  properties: {
-    managedEnvironmentId: caEnv.id
-    configuration: {
-      ingress: {
-        external: false
-        targetPort: 6042
-        transport: 'http'
-      }
-      secrets: zammadSecrets
-    }
-    template: {
-      containers: [
         {
           name: 'zammad-websocket'
           image: zammadImage
-          args: ['zammad-websocket']
+          command: ['/bin/bash', '-c']
+          args: ['until (echo >/dev/tcp/localhost/3000) 2>/dev/null; do sleep 5; done && exec /docker-entrypoint.sh zammad-websocket']
           env: zammadEnv
           resources: { cpu: json('0.5'), memory: '1Gi' }
         }

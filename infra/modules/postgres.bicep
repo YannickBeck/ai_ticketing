@@ -135,7 +135,7 @@ resource createDbUsers 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
     azCliVersion: '2.52.0'
     retentionInterval: 'P1D'
     cleanupPreference: 'OnSuccess'
-    forceUpdateTag: 'v1'
+    forceUpdateTag: 'v2'
     environmentVariables: [
       { name: 'PG_HOST', value: pgServer.properties.fullyQualifiedDomainName }
       { name: 'PG_ADMIN_USER', value: adminLogin }
@@ -159,11 +159,13 @@ resource createDbUsers 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
 
       run_sql postgres "CREATE USER zammad_user WITH PASSWORD '$PG_ZAMMAD_PASSWORD';" 2>/dev/null || \
         run_sql postgres "ALTER USER zammad_user WITH PASSWORD '$PG_ZAMMAD_PASSWORD';"
+      run_sql postgres "ALTER USER zammad_user CREATEDB;"
       run_sql postgres "GRANT ALL PRIVILEGES ON DATABASE zammad TO zammad_user;"
       run_sql zammad  "GRANT ALL ON SCHEMA public TO zammad_user;"
 
       echo "DB users provisioned"
     '''
   }
-  dependsOn: [dbN8n, dbZammad, scriptContributorRole]
+  // pgVectorExtension listed here to prevent ServerIsBusy conflicts — ARM runs config updates and scripts in parallel otherwise
+  dependsOn: [dbN8n, dbZammad, scriptContributorRole, pgVectorExtension]
 }
